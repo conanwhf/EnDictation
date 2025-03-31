@@ -58,6 +58,14 @@ OCR_MODEL = ocr_ai_models["gemini-ocr"]
 #TTS_MODEL = tts_models["qwen-tts"]
 TTS_MODEL = tts_models["gtts"]
 
+# 打印当前使用的OCR模型和API密钥
+print("--- All Environment Variables ---")
+# 使用 json.dumps 让字典输出更易读，特别是值包含特殊字符时
+print(json.dumps(dict(os.environ), indent=2))
+print("--- End Environment Variables ---")
+print("QWEN key: ", ocr_ai_models["qwen-ocr"]["key"])
+print("GOOGLE key: ", ocr_ai_models["gemini-ocr"]["key"])
+
 # 确保上传和音频文件夹存在
 UPLOAD_FOLDER = 'uploads'
 AUDIO_FOLDER = 'audio'
