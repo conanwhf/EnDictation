@@ -44,7 +44,7 @@ ocr_ai_models = {
 # TTS服务配置字典
 tts_models = {
     "qwen-tts": {
-        "key": os.environ.get("QWEN_API_KEY", "sk-3d1f8e0046754a4498cfc8d7ab6d85ea"),
+        "key": os.environ.get("QWEN_API_KEY", "sk-demo"),
         "model": "cosyvoice-v1",
         "voice": "longxiaochun",
     },
@@ -369,6 +369,6 @@ def get_status():
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=5000, help='Port to run the server on')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5000)), help='Port to run the server on')
     args = parser.parse_args()
-    app.run(debug=True, port=args.port)
+    app.run(host='0.0.0.0', debug=False, port=args.port)

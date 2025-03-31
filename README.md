@@ -83,6 +83,72 @@ export GOOGLE_API_KEY="您的Gemini API密钥"
 ```
 如果不设置环境变量，应用将使用默认值。
 
+## Azure App Service 部署说明
+
+本应用已适配Azure App Service，可以按照以下步骤进行部署：
+
+### 前提条件
+
+1. 安装Azure CLI工具
+2. 拥有Azure账号和订阅
+
+### 部署步骤
+
+1. **登录Azure**
+
+   ```bash
+   az login
+   ```
+
+2. **创建资源组**（如果尚未创建）
+
+   ```bash
+   az group create --name myResourceGroup --location eastasia
+   ```
+
+3. **创建App Service计划**
+
+   ```bash
+   az appservice plan create --name myAppServicePlan --resource-group myResourceGroup --sku B1 --is-linux
+   ```
+
+4. **创建Web应用**
+
+   ```bash
+   az webapp create --resource-group myResourceGroup --plan myAppServicePlan --name your-app-name --runtime "PYTHON|3.9" --deployment-local-git
+   ```
+
+5. **配置环境变量**
+
+   在Azure门户中，导航到您的Web应用 -> 配置 -> 应用程序设置，添加以下环境变量：
+   - `QWEN_API_KEY`: 您的阿里云API密钥
+   - `GOOGLE_API_KEY`: 您的Google API密钥
+
+6. **部署应用**
+
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git remote add azure <deployment-url-from-previous-step>
+   git push azure master
+   ```
+
+   或者，您也可以使用Azure门户中的部署中心，通过GitHub、BitBucket或Azure Repos进行持续部署。
+
+7. **访问应用**
+
+   部署完成后，您可以通过以下URL访问应用：
+   ```
+   https://your-app-name.azurewebsites.net
+   ```
+
+### 故障排除
+
+- 如果遇到部署问题，请检查Azure门户中的应用日志
+- 确保所有必要的依赖项都已在requirements.txt中列出
+- 验证环境变量是否正确配置
+
 ## 目录结构
 
 - `app.py`: 主应用程序
