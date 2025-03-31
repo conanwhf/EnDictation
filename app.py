@@ -82,10 +82,33 @@ def extract_text_cloud(image_path):
         image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
     
     # 根据AI demo.py示例构建正确的OCR请求格式
-    client = OpenAI(
-        api_key=OCR_MODEL["key"],
-        base_url=OCR_MODEL["url"],
-    )
+    # 修改客户端初始化部分
+    # 最简化的客户端初始化 - 避免使用proxies参数
+    import os
+    
+    # 临时保存当前环境变量中可能存在的代理设置
+    http_proxy = os.environ.pop('HTTP_PROXY', None)
+    https_proxy = os.environ.pop('HTTPS_PROXY', None)
+    no_proxy = os.environ.pop('NO_PROXY', None)
+    
+    try:
+        # 不使用代理初始化客户端
+        client = OpenAI(
+            api_key=OCR_MODEL["key"],
+            base_url=OCR_MODEL["url"]
+        )
+        print("成功初始化OpenAI客户端")
+    except Exception as e:
+        print(f"OpenAI客户端初始化错误: {e}")
+        raise
+    finally:
+        # 恢复环境变量
+        if http_proxy:
+            os.environ['HTTP_PROXY'] = http_proxy
+        if https_proxy:
+            os.environ['HTTPS_PROXY'] = https_proxy
+        if no_proxy:
+            os.environ['NO_PROXY'] = no_proxy
     
     # 使用与AI demo.py一致的API调用方式
     response = client.chat.completions.create(
