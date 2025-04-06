@@ -54,9 +54,10 @@
    - macOS: `brew install tesseract`
    - Linux: `sudo apt install tesseract-ocr`
 
-4. 安装可选的本地TTS依赖（如果不需要本地TTS功能可跳过）：
+4. 安装可选的本地TTS依赖（如果不需要对应的TTS功能可跳过）：
    ```
    pip install pyttsx3 gtts
+   pip install azure-cognitiveservices-speech
    ```
 
 ## 使用方法
@@ -79,6 +80,8 @@
 export QWEN_API_KEY="您的阿里云API密钥"
 # Google Gemini API配置
 export GOOGLE_API_KEY="您的Gemini API密钥"
+# Azure API配置
+export AZURE_API_KEY="您的Azure API密钥"
 
 ```
 如果不设置环境变量，应用将使用默认值。

@@ -7,3 +7,4 @@ dashscope==1.22.2
 gtts==2.5.4
 pytesseract==0.3.13
 Pillow==11.1.0
+azure-cognitiveservices-speech==1.43.0

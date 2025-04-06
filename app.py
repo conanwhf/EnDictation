@@ -17,6 +17,14 @@ except ImportError:
     print("警告: dashscope库未安装，云端TTS功能不可用，请使用pip install dashscope安装")
     TTS_QWEN_AVAILABLE = False
 
+# 导入Azure语音SDK
+try:
+    import azure.cognitiveservices.speech as speechsdk
+    TTS_AZURE_AVAILABLE = True
+except ImportError:
+    print("警告: azure-cognitiveservices-speech库未安装，Azure TTS功能不可用，请使用pip install azure-cognitiveservices-speech安装")
+    TTS_AZURE_AVAILABLE = False
+
 # 导入本地TTS相关库（调用Google TTS实现）
 try:
     from gtts import gTTS
@@ -52,10 +60,16 @@ tts_models = {
         "lang": "en", 
         "tld": "co.uk", 
     },
+    "ms-tts": {
+        "speech_key": os.environ.get("AZURE_API_KEY", "demo"),
+        "service_region": "southeastasia",
+        "voice_name": "en-SG-LunaNeural",
+        #"voice_name": "en-SG-WayneNeural",
+        "speed": "-15%",
+    },
 }
 # 模型配置
 OCR_MODEL = ocr_ai_models["gemini-ocr"]
-#TTS_MODEL = tts_models["qwen-tts"]
 TTS_MODEL = tts_models["gtts"]
 # OCR提示词
 OCR_PROMT = "请你将图片处理成文本，使用markdown输出。对于每个句子：如果句子中有被圈出的部分，仅把圈出来的部分用粗体标记；如果没有被圈出来的部分，则将识别到的粗体单词用粗体标记"
@@ -173,6 +187,10 @@ def generate_audio(text, filename):
     if (TTS_MODEL == tts_models["qwen-tts"]) and TTS_QWEN_AVAILABLE:
         print(f"使用QWEN TTS服务生成音频: {filename}")
         return generate_audio_qwen(text, filename)
+    # 再次检查是否可以使用Azure TTS
+    if (TTS_MODEL == tts_models["ms-tts"]) and TTS_AZURE_AVAILABLE:
+        print(f"使用Azure TTS服务生成音频: {filename}")
+        return generate_audio_azure(text, filename)
     
     # 如果以上方式都不可用，创建空文件作为后备方案
     print(f"警告: TTS服务不可用或未启用，无法生成音频")
@@ -228,6 +246,69 @@ def generate_audio_qwen(text, filename):
     except Exception as e:
         print(f"云端TTS生成失败: {str(e)}")
        
+    # 失败后创建空文件作为后备方案
+    with open(audio_path, 'wb') as audio_file:
+        audio_file.write(b'')
+    return audio_path
+
+def generate_audio_azure(text, filename):
+    """使用Azure语音服务生成音频"""
+    audio_path = os.path.join(AUDIO_FOLDER, filename)
+    
+    try:
+        # 检查输入文本是否为空
+        if not text or not text.strip():
+            raise ValueError("输入文本为空，无法生成音频")
+        
+        # 配置Azure语音服务
+        speech_key = TTS_MODEL["speech_key"]
+        service_region = TTS_MODEL["service_region"]
+        voice_name = TTS_MODEL["voice_name"]
+        speed_rate = TTS_MODEL["speed"]
+        
+        # 创建语音配置
+        speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
+        speech_config.speech_synthesis_voice_name = voice_name
+        
+        # 创建语音合成器
+        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+        
+        # 使用SSML格式设置慢速语音
+        ssml_text = f"""
+<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
+    <voice name='{voice_name}'>
+        <prosody rate='{speed_rate}'>
+            {text}
+        </prosody>
+    </voice>
+</speak>
+"""
+        
+        # 合成音频
+        result = speech_synthesizer.speak_ssml_async(ssml_text).get()
+        
+        # 检查结果
+        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+            # 获取音频数据
+            audio_data = result.audio_data
+            
+            # 保存音频文件
+            with open(audio_path, 'wb') as f:
+                f.write(audio_data)
+                
+            print(f"Azure TTS生成成功: {filename}")
+            return audio_path
+        elif result.reason == speechsdk.ResultReason.Canceled:
+            cancellation_details = result.cancellation_details
+            print(f"Azure TTS合成取消: {cancellation_details.reason}")
+            if cancellation_details.reason == speechsdk.CancellationReason.Error:
+                print(f"错误详情: {cancellation_details.error_details}")
+            raise ValueError(f"Azure TTS合成失败: {cancellation_details.reason}")
+        else:
+            raise ValueError(f"Azure TTS合成失败，未知原因: {result.reason}")
+    except Exception as e:
+        print(f"Azure TTS生成失败: {str(e)}")
+    
     # 失败后创建空文件作为后备方案
     with open(audio_path, 'wb') as audio_file:
         audio_file.write(b'')
