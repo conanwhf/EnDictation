@@ -30,9 +30,9 @@ app = Flask(__name__)
 # AI服务配置字典
 ocr_ai_models = {
     "qwen-ocr": {
-        "key": os.environ.get("QWEN_API_KEY", "sk-demo"),
+        "key": os.environ.get("QWEN_API_KEY", "demo"),
         "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "name": "qwen-vl-max-latest",
+        "name": "qvq-max-latest",
     },
     "gemini-ocr": {
         "key": os.environ.get("GOOGLE_API_KEY", "demo"),
@@ -44,7 +44,7 @@ ocr_ai_models = {
 # TTS服务配置字典
 tts_models = {
     "qwen-tts": {
-        "key": os.environ.get("QWEN_API_KEY", "sk-demo"),
+        "key": os.environ.get("QWEN_API_KEY", "demo"),
         "model": "cosyvoice-v1",
         "voice": "longxiaochun",
     },
@@ -57,12 +57,9 @@ tts_models = {
 OCR_MODEL = ocr_ai_models["gemini-ocr"]
 #TTS_MODEL = tts_models["qwen-tts"]
 TTS_MODEL = tts_models["gtts"]
-
+# OCR提示词
+OCR_PROMT = "请你将图片处理成文本，使用markdown输出，加粗的单词用粗体标记"
 # 打印当前使用的OCR模型和API密钥
-print("--- All Environment Variables ---")
-# 使用 json.dumps 让字典输出更易读，特别是值包含特殊字符时
-print(json.dumps(dict(os.environ), indent=2))
-print("--- End Environment Variables ---")
 print("QWEN key: ", ocr_ai_models["qwen-ocr"]["key"])
 print("GOOGLE key: ", ocr_ai_models["gemini-ocr"]["key"])
 
@@ -119,7 +116,7 @@ def extract_text_cloud(image_path):
                 "content": [
                     {
                         "type": "text",
-                        "text": "请你将图片处理成文本，使用markdown输出，加粗的单词用粗体标记",
+                        "text": OCR_PROMT,
                     },
                     {
                         "type": "image_url",
@@ -168,16 +165,16 @@ def extract_text_cloud(image_path):
     return sentences
 
 def generate_audio(text, filename):
-    # 优先检查是否可以使用云端TTS
+    # 优先检查是否可以使用Google TTS
     if (TTS_MODEL == tts_models["gtts"]) and TTS_GTTS_AVAILABLE:
         print(f"使用GTTS服务生成音频: {filename}")
         return generate_audio_gtts(text, filename)
-    # 其次检查是否可以使用本地TTS
+    # 其次检查是否可以使用Qwen TTS
     if (TTS_MODEL == tts_models["qwen-tts"]) and TTS_QWEN_AVAILABLE:
         print(f"使用QWEN TTS服务生成音频: {filename}")
         return generate_audio_qwen(text, filename)
     
-    # 如果以上两种方式都不可用，创建空文件作为后备方案
+    # 如果以上方式都不可用，创建空文件作为后备方案
     print(f"警告: TTS服务不可用或未启用，无法生成音频")
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     with open(audio_path, 'wb') as audio_file:
@@ -338,8 +335,12 @@ def upload_file():
                                 
                                 # 直接在句子中嵌入单词按钮
                                 # 创建一个带有播放按钮的HTML片段，替换原始单词
+                                # 使用正则表达式进行精确替换，避免替换句子中所有相同的单词
                                 button_html = f'<span class="word-item bold" onclick="playAudio(\'word_{idx}_{widx}.mp3\')"><i class="bi bi-play-circle-fill"></i> {word}</span>'
-                                html_text = html_text.replace(word, button_html)
+                                # 使用正则表达式确保只替换完整的单词，而不是单词的一部分
+                                pattern = r'\b' + re.escape(word) + r'\b'
+                                # 只替换第一次出现的实例
+                                html_text = re.sub(pattern, button_html, html_text, count=1)
                             except Exception as e:
                                 print(f"单词音频生成错误: {e}")
                                 # 继续处理其他单词
@@ -400,6 +401,6 @@ def get_status():
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5000)), help='Port to run the server on')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5001)), help='Port to run the server on')
     args = parser.parse_args()
     app.run(host='0.0.0.0', debug=False, port=args.port)
