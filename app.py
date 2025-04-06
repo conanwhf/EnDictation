@@ -58,7 +58,7 @@ OCR_MODEL = ocr_ai_models["gemini-ocr"]
 #TTS_MODEL = tts_models["qwen-tts"]
 TTS_MODEL = tts_models["gtts"]
 # OCR提示词
-OCR_PROMT = "请你将图片处理成文本，使用markdown输出，加粗的单词用粗体标记"
+OCR_PROMT = "请你将图片处理成文本，使用markdown输出。对于每个句子：如果句子中有被圈出的部分，仅把圈出来的部分用粗体标记；如果没有被圈出来的部分，则将识别到的粗体单词用粗体标记"
 # 打印当前使用的OCR模型和API密钥
 print("QWEN key: ", ocr_ai_models["qwen-ocr"]["key"])
 print("GOOGLE key: ", ocr_ai_models["gemini-ocr"]["key"])
@@ -290,7 +290,16 @@ def upload_file():
         # 为每个句子和加粗单词生成音频
         processing_status['message'] = '正在生成音频'
         result = []
-        total_sentences = len([s for s in sentences if s.get('has_number', False)])
+        
+        # 检查是否有"My Word Wall"部分
+        word_wall_index = -1
+        for i, s in enumerate(sentences):
+            if s['text'].strip().startswith("My Word Wall"):
+                word_wall_index = i
+                break
+                
+        # 计算需要处理的句子总数（排除My Word Wall后面的部分）
+        total_sentences = len(sentences) if word_wall_index == -1 else word_wall_index
         processed_count = 0
         
         for idx, sentence in enumerate(sentences):
@@ -303,8 +312,8 @@ def upload_file():
                     'html_text': sentence['text']  # 初始化为原始文本
                 }
                 
-                # 只为带数字标号的句子生成音频
-                if sentence.get('has_number', False):
+                # 为所有句子生成音频，但排除My Word Wall后面的部分
+                if word_wall_index == -1 or idx < word_wall_index:
                     processed_count += 1
                     processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子'
                 
