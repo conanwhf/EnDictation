@@ -145,7 +145,24 @@
         <div class="upload-area" id="upload-area">
             <p>拖放图片到此处或点击选择文件</p>
             <input type="file" id="file-input" class="d-none" accept="image/*">
-            <button class="btn btn-primary" id="select-file-btn">选择图片</button>
+            <div class="row mb-3">
+    <div class="col-md-6">
+        <label for="ocr-select" class="form-label">OCR方式</label>
+        <select class="form-select" id="ocr-select">
+            <option value="qwen-ocr">Qwen OCR</option>
+            <option value="gemini-ocr" selected>Gemini OCR</option>
+        </select>
+    </div>
+    <div class="col-md-6">
+        <label for="tts-select" class="form-label">TTS方式</label>
+        <select class="form-select" id="tts-select">
+            <option value="qwen-tts">Qwen TTS</option>
+            <option value="gtts" selected>Google TTS</option>
+            <option value="ms-tts">Azure TTS</option>
+        </select>
+    </div>
+</div>
+<button class="btn btn-primary" id="select-file-btn">选择图片</button>
             <img id="preview-image" class="mt-3" alt="预览图片">
         </div>
         
@@ -244,6 +261,12 @@
             function uploadFile(file) {
                 const formData = new FormData();
                 formData.append('file', file);
+                
+                // 添加OCR和TTS选择器的值到表单数据
+                const ocrSelect = document.getElementById('ocr-select');
+                const ttsSelect = document.getElementById('tts-select');
+                formData.append('ocr-select', ocrSelect.value);
+                formData.append('tts-select', ttsSelect.value);
                 
                 // 显示加载中
                 loading.style.display = 'block';

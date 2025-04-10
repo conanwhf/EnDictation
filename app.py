@@ -40,7 +40,7 @@ ocr_ai_models = {
     "qwen-ocr": {
         "key": os.environ.get("QWEN_API_KEY", "demo"),
         "url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "name": "qvq-max-latest",
+        "name": "qwen-vl-max-latest",
     },
     "gemini-ocr": {
         "key": os.environ.get("GOOGLE_API_KEY", "demo"),
@@ -65,14 +65,26 @@ tts_models = {
         "service_region": "southeastasia",
         "voice_name": "en-SG-LunaNeural",
         #"voice_name": "en-SG-WayneNeural",
-        "speed": "-15%",
+        "speed": "-10%",
     },
 }
 # 模型配置
-OCR_MODEL = ocr_ai_models["gemini-ocr"]
-TTS_MODEL = tts_models["gtts"]
+def get_selected_model(request, model_type):
+    if model_type == 'ocr':
+        selected = request.form.get('ocr-select', 'gemini-ocr')
+        return ocr_ai_models[selected]
+    elif model_type == 'tts':
+        selected = request.form.get('tts-select', 'gtts')
+        return tts_models[selected]
+
+@app.route('/')
+def index():
+    return render_template('index.html', 
+        ocr_options=ocr_ai_models.keys(), 
+        tts_options=tts_models.keys()
+    )
 # OCR提示词
-OCR_PROMT = "请你将图片处理成文本，使用markdown输出。对于每个句子：如果句子中有被圈出的部分，仅把圈出来的部分用粗体标记；如果没有被圈出来的部分，则将识别到的粗体单词用粗体标记"
+OCR_PROMT = "请你将图片处理成文本，每句一行，使用markdown输出。对于每个句子：如果句子中有被圈出的部分，仅把圈出来的部分用粗体标记；如果没有被圈出来的部分，则将识别到的粗体单词用粗体标记。"
 # 打印当前使用的OCR模型和API密钥
 print("QWEN key: ", ocr_ai_models["qwen-ocr"]["key"])
 print("GOOGLE key: ", ocr_ai_models["gemini-ocr"]["key"])
@@ -83,8 +95,7 @@ AUDIO_FOLDER = 'audio'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(AUDIO_FOLDER, exist_ok=True)
 
-
-def extract_text_cloud(image_path):
+def extract_text_cloud(image_path, ocr_model):
     """使用云API进行OCR识别"""
     print("使用云端OCR服务处理图片")
     # 将图片转换为base64编码
@@ -105,8 +116,8 @@ def extract_text_cloud(image_path):
     try:
         # 不使用代理初始化客户端
         client = OpenAI(
-            api_key=OCR_MODEL["key"],
-            base_url=OCR_MODEL["url"]
+            api_key=ocr_model["key"],
+            base_url=ocr_model["url"]
         )
         print("成功初始化OpenAI客户端")
     except Exception as e:
@@ -123,7 +134,7 @@ def extract_text_cloud(image_path):
     
     # 使用与AI demo.py一致的API调用方式
     response = client.chat.completions.create(
-        model=OCR_MODEL["name"],
+        model=ocr_model["name"],
         messages=[
             {
                 "role": "user",
@@ -178,19 +189,19 @@ def extract_text_cloud(image_path):
             })
     return sentences
 
-def generate_audio(text, filename):
+def generate_audio(text, filename, tts_model=None):
     # 优先检查是否可以使用Google TTS
-    if (TTS_MODEL == tts_models["gtts"]) and TTS_GTTS_AVAILABLE:
+    if (tts_model == tts_models["gtts"]) and TTS_GTTS_AVAILABLE:
         print(f"使用GTTS服务生成音频: {filename}")
-        return generate_audio_gtts(text, filename)
+        return generate_audio_gtts(text, filename, tts_model)
     # 其次检查是否可以使用Qwen TTS
-    if (TTS_MODEL == tts_models["qwen-tts"]) and TTS_QWEN_AVAILABLE:
+    if (tts_model == tts_models["qwen-tts"]) and TTS_QWEN_AVAILABLE:
         print(f"使用QWEN TTS服务生成音频: {filename}")
-        return generate_audio_qwen(text, filename)
+        return generate_audio_qwen(text, filename, tts_model)
     # 再次检查是否可以使用Azure TTS
-    if (TTS_MODEL == tts_models["ms-tts"]) and TTS_AZURE_AVAILABLE:
+    if (tts_model == tts_models["ms-tts"]) and TTS_AZURE_AVAILABLE:
         print(f"使用Azure TTS服务生成音频: {filename}")
-        return generate_audio_azure(text, filename)
+        return generate_audio_azure(text, filename, tts_model)
     
     # 如果以上方式都不可用，创建空文件作为后备方案
     print(f"警告: TTS服务不可用或未启用，无法生成音频")
@@ -199,28 +210,31 @@ def generate_audio(text, filename):
         audio_file.write(b'')
     return audio_path
 
-def generate_audio_gtts(text, filename):
+def generate_audio_gtts(text, filename, tts_model=None):
     """使用本地TTS库生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
-    
+    if tts_model is None:
+        tts_model = tts_models["gtts"]
+
     # 使用gTTS (需要网络连接，但质量较好)
-    tts = gTTS(text=text, lang=TTS_MODEL["lang"], tld=TTS_MODEL["tld"], slow=False)
+    tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_models["gtts"]["tld"], slow=False)
     tts.save(audio_path)
     return audio_path
 
-def generate_audio_qwen(text, filename):
+def generate_audio_qwen(text, filename, tts_model=None):
     """使用阿里云TTS服务生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
-    
+    if tts_model is None:
+        tts_model = tts_models["qwen-tts"]
     try:
         # 检查输入文本是否为空
         if not text or not text.strip():
             raise ValueError("输入文本为空，无法生成音频")
             
         # 配置阿里云TTS模型和声音
-        dashscope.api_key = TTS_MODEL["key"]
-        model = TTS_MODEL["model"]  # 使用与API demo相同的模型
-        voice = TTS_MODEL["voice"]  # 使用与API demo相同的声音
+        dashscope.api_key = tts_model["key"]
+        model = tts_model["model"]  # 使用与API demo相同的模型
+        voice = tts_model["voice"]  # 使用与API demo相同的声音
         
         # 初始化语音合成器
         synthesizer = SpeechSynthesizer(model=model, voice=voice)
@@ -251,27 +265,32 @@ def generate_audio_qwen(text, filename):
         audio_file.write(b'')
     return audio_path
 
-def generate_audio_azure(text, filename):
+
+def generate_audio_azure(text, filename, tts_model=None):
     """使用Azure语音服务生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
-    
+    if tts_model is None:
+        tts_model = tts_models["ms-tts"]
     try:
         # 检查输入文本是否为空
         if not text or not text.strip():
             raise ValueError("输入文本为空，无法生成音频")
         
         # 配置Azure语音服务
-        speech_key = TTS_MODEL["speech_key"]
-        service_region = TTS_MODEL["service_region"]
-        voice_name = TTS_MODEL["voice_name"]
-        speed_rate = TTS_MODEL["speed"]
+        speech_key = tts_model["speech_key"]
+        service_region = tts_model["service_region"]
+        voice_name = tts_model["voice_name"]
+        speed_rate = tts_model["speed"]
         
         # 创建语音配置
         speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
         speech_config.speech_synthesis_voice_name = voice_name
         
-        # 创建语音合成器
-        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config)
+        # 创建音频输出配置 - 使用文件输出而不是默认扬声器，以禁止自动播放
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=audio_path)
+        
+        # 创建语音合成器 - 指定音频配置以禁止自动播放
+        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
         
         # 使用SSML格式设置慢速语音
         ssml_text = f"""
@@ -314,17 +333,16 @@ def generate_audio_azure(text, filename):
         audio_file.write(b'')
     return audio_path
 
-@app.route('/')
-def index():
-    return render_template('index.html')
+
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    global processing_status
     try:
         # 更新状态为处理中
-        processing_status['status'] = 'processing'
-        processing_status['message'] = '开始处理上传的图片'
+        processing_status = {
+            'status': 'processing',
+            'message': '开始处理上传的图片'
+        }
         
         if 'file' not in request.files:
             processing_status['status'] = 'idle'
@@ -357,7 +375,8 @@ def upload_file():
         # 处理图片并提取文本
         try:
             processing_status['message'] = '正在进行OCR识别'
-            sentences = extract_text_cloud(image_path)
+            ocr_model = get_selected_model(request, 'ocr')
+            sentences = extract_text_cloud(image_path, ocr_model)
             if not sentences:
                 processing_status['status'] = 'idle'
                 processing_status['message'] = '准备就绪'
@@ -399,9 +418,11 @@ def upload_file():
                     processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子'
                 
                     # 生成整句音频
+                    tts_model = get_selected_model(request, 'tts')
                     sentence_audio = generate_audio(
                         sentence['text'],
-                        f'sentence_{idx}.mp3'
+                        f'sentence_{idx}.mp3',
+                        tts_model
                     )
                     sentence_data['audio_path'] = f'sentence_{idx}.mp3'
                     
@@ -416,7 +437,8 @@ def upload_file():
                             try:
                                 word_audio = generate_audio(
                                     word,
-                                    f'word_{idx}_{widx}.mp3'
+                                    f'word_{idx}_{widx}.mp3',
+                                    tts_model
                                 )
                                 word_audios.append({
                                     'word': word,
@@ -478,11 +500,15 @@ def serve_audio(filename):
         as_attachment=False
     )
 
-# 添加全局变量用于跟踪处理状态
-processing_status = {
-    'status': 'idle',  # idle, processing, done
-    'message': '准备就绪'
-}
+# 初始化处理状态
+def init_processing_status():
+    return {
+        'status': 'idle',  # idle, processing, done
+        'message': '准备就绪'
+    }
+
+# 创建处理状态实例
+processing_status = init_processing_status()
 
 @app.route('/status')
 def get_status():
