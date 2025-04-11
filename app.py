@@ -51,30 +51,40 @@ ocr_ai_models = {
 
 # TTS服务配置字典
 tts_models = {
-    "qwen-tts": {
+    "Chinese": {
+        "type": "qwen-tts",
         "key": os.environ.get("QWEN_API_KEY", "demo"),
         "model": "cosyvoice-v1",
         "voice": "longxiaochun",
     },
-    "gtts": {
-        "lang": "en", 
-        "tld": "co.uk", 
+    "UK": {
+        "type": "gtts",
+        "lang": "en",
+        "tld": "co.uk",
     },
-    "ms-tts": {
+    "SG-man": {
+        "type": "ms-tts",
+        "speech_key": os.environ.get("AZURE_API_KEY", "demo"),
+        "service_region": "southeastasia",
+        "voice_name": "en-SG-WayneNeural",
+        "speed": "-10%",
+    },
+    "SG-woman": {
+        "type": "ms-tts",
         "speech_key": os.environ.get("AZURE_API_KEY", "demo"),
         "service_region": "southeastasia",
         "voice_name": "en-SG-LunaNeural",
-        #"voice_name": "en-SG-WayneNeural",
         "speed": "-10%",
     },
 }
+
 # 模型配置
 def get_selected_model(request, model_type):
     if model_type == 'ocr':
         selected = request.form.get('ocr-select', 'gemini-ocr')
         return ocr_ai_models[selected]
     elif model_type == 'tts':
-        selected = request.form.get('tts-select', 'gtts')
+        selected = request.form.get('tts-select', 'UK')
         return tts_models[selected]
 
 @app.route('/')
@@ -190,16 +200,16 @@ def extract_text_cloud(image_path, ocr_model):
     return sentences
 
 def generate_audio(text, filename, tts_model=None):
-    # 优先检查是否可以使用Google TTS
-    if (tts_model == tts_models["gtts"]) and TTS_GTTS_AVAILABLE:
+    # 使用Google TTS
+    if tts_model["type"] == "gtts" and TTS_GTTS_AVAILABLE:
         print(f"使用GTTS服务生成音频: {filename}")
         return generate_audio_gtts(text, filename, tts_model)
-    # 其次检查是否可以使用Qwen TTS
-    if (tts_model == tts_models["qwen-tts"]) and TTS_QWEN_AVAILABLE:
+    # 使用阿里云Qwen TTS
+    if tts_model["type"] == "qwen-tts" and TTS_QWEN_AVAILABLE:
         print(f"使用QWEN TTS服务生成音频: {filename}")
         return generate_audio_qwen(text, filename, tts_model)
-    # 再次检查是否可以使用Azure TTS
-    if (tts_model == tts_models["ms-tts"]) and TTS_AZURE_AVAILABLE:
+    # 使用Azure TTS
+    if tts_model["type"] == "ms-tts" and TTS_AZURE_AVAILABLE:
         print(f"使用Azure TTS服务生成音频: {filename}")
         return generate_audio_azure(text, filename, tts_model)
     
@@ -214,10 +224,11 @@ def generate_audio_gtts(text, filename, tts_model=None):
     """使用本地TTS库生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     if tts_model is None:
-        tts_model = tts_models["gtts"]
+        # 使用UK配置作为默认gtts配置
+        tts_model = tts_models["UK"]
 
     # 使用gTTS (需要网络连接，但质量较好)
-    tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_models["gtts"]["tld"], slow=False)
+    tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_model["tld"], slow=False)
     tts.save(audio_path)
     return audio_path
 
@@ -225,7 +236,7 @@ def generate_audio_qwen(text, filename, tts_model=None):
     """使用阿里云TTS服务生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     if tts_model is None:
-        tts_model = tts_models["qwen-tts"]
+        tts_model = tts_models["Chinese"]
     try:
         # 检查输入文本是否为空
         if not text or not text.strip():
@@ -270,7 +281,7 @@ def generate_audio_azure(text, filename, tts_model=None):
     """使用Azure语音服务生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     if tts_model is None:
-        tts_model = tts_models["ms-tts"]
+        tts_model = tts_models["SG-man"]
     try:
         # 检查输入文本是否为空
         if not text or not text.strip():
