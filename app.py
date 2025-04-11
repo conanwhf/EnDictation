@@ -93,8 +93,9 @@ def index():
         ocr_options=ocr_ai_models.keys(), 
         tts_options=tts_models.keys()
     )
+
 # OCR提示词
-OCR_PROMT = "请你将图片处理成文本，每句一行，使用markdown输出。对于每个句子：如果句子中有被圈出的部分，仅把圈出来的部分用粗体标记；如果没有被圈出来的部分，则将识别到的粗体单词用粗体标记。"
+OCR_PROMT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
 # 打印当前使用的OCR模型和API密钥
 print("QWEN key: ", ocr_ai_models["qwen-ocr"]["key"])
 print("GOOGLE key: ", ocr_ai_models["gemini-ocr"]["key"])
