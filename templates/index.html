@@ -348,10 +348,11 @@
                     // 跳过已作为标题显示的第一行
                     if (sentence.is_title) return;
                     
-                    // 对带标号的句子使用分块显示
-                    if (sentence.has_number) {
+                    // 判断是否有音频路径，有则添加播放按钮
+                    if (sentence.audio_path) {
                         const sentenceDiv = document.createElement('div');
-                        sentenceDiv.className = 'sentence-item numbered';
+                        // 如果是带标号的句子，添加numbered类
+                        sentenceDiv.className = sentence.has_number ? 'sentence-item numbered' : 'sentence-item';
                         
                         // 创建句子文本和播放按钮
                         const sentenceText = document.createElement('p');
@@ -402,7 +403,7 @@
                         
                         sentencesContainer.appendChild(sentenceDiv);
                     } else {
-                        // 非标号句子直接显示，保留markdown格式
+                        // 没有音频的句子直接显示，保留markdown格式
                         const textDiv = document.createElement('div');
                         textDiv.className = 'mb-3';
                         
