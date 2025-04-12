@@ -6,7 +6,12 @@ import json
 import base64
 import numpy as np
 import soundfile as sf
+import logging
 from openai import OpenAI
+
+# 配置日志记录
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 # 导入阿里云TTS相关库
 try:
@@ -14,7 +19,7 @@ try:
     import dashscope
     TTS_QWEN_AVAILABLE = True
 except ImportError:
-    print("警告: dashscope库未安装，云端TTS功能不可用，请使用pip install dashscope安装")
+    logger.warning("dashscope库未安装，云端TTS功能不可用，请使用pip install dashscope安装")
     TTS_QWEN_AVAILABLE = False
 
 # 导入Azure语音SDK
@@ -22,7 +27,7 @@ try:
     import azure.cognitiveservices.speech as speechsdk
     TTS_AZURE_AVAILABLE = True
 except ImportError:
-    print("警告: azure-cognitiveservices-speech库未安装，Azure TTS功能不可用，请使用pip install azure-cognitiveservices-speech安装")
+    logger.warning("azure-cognitiveservices-speech库未安装，Azure TTS功能不可用，请使用pip install azure-cognitiveservices-speech安装")
     TTS_AZURE_AVAILABLE = False
 
 # 导入本地TTS相关库（调用Google TTS实现）
@@ -30,7 +35,7 @@ try:
     from gtts import gTTS
     TTS_GTTS_AVAILABLE = True
 except ImportError:
-    print("警告: gtts库未安装，本地TTS功能不可用")
+    logger.warning("gtts库未安装，本地TTS功能不可用")
     TTS_GTTS_AVAILABLE = False
 
 app = Flask(__name__)
@@ -95,10 +100,11 @@ def index():
     )
 
 # OCR提示词
-OCR_PROMT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
-# 打印当前使用的OCR模型和API密钥
-print("QWEN key: ", ocr_ai_models["qwen-ocr"]["key"])
-print("GOOGLE key: ", ocr_ai_models["gemini-ocr"]["key"])
+OCR_PROMPT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
+# 记录当前使用的OCR模型和API密钥
+logger.info(f"QWEN key: {ocr_ai_models['qwen-ocr']['key']}")
+logger.info(f"GOOGLE key: {ocr_ai_models['gemini-ocr']['key']}")
+
 
 # 确保上传和音频文件夹存在
 UPLOAD_FOLDER = 'uploads'
@@ -106,19 +112,17 @@ AUDIO_FOLDER = 'audio'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(AUDIO_FOLDER, exist_ok=True)
 
-def extract_text_cloud(image_path, ocr_model):
-    """使用云API进行OCR识别"""
-    print("使用云端OCR服务处理图片")
-    # 将图片转换为base64编码
-    with open(image_path, 'rb') as image_file:
-        import base64
-        image_base64 = base64.b64encode(image_file.read()).decode('utf-8')
-    
-    # 根据AI demo.py示例构建正确的OCR请求格式
-    # 修改客户端初始化部分
-    # 最简化的客户端初始化 - 避免使用proxies参数
-    import os
-    
+def encode_image_to_base64(image_path):
+    """将图片转换为base64编码"""
+    try:
+        with open(image_path, 'rb') as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+        logger.error(f"图片编码失败: {str(e)}")
+        raise ValueError(f"无法读取或编码图片: {str(e)}")
+
+def init_ocr_client(ocr_model):
+    """初始化OCR客户端，处理代理设置"""
     # 临时保存当前环境变量中可能存在的代理设置
     http_proxy = os.environ.pop('HTTP_PROXY', None)
     https_proxy = os.environ.pop('HTTPS_PROXY', None)
@@ -130,9 +134,10 @@ def extract_text_cloud(image_path, ocr_model):
             api_key=ocr_model["key"],
             base_url=ocr_model["url"]
         )
-        print("成功初始化OpenAI客户端")
+        logger.info("成功初始化OCR客户端")
+        return client
     except Exception as e:
-        print(f"OpenAI客户端初始化错误: {e}")
+        logger.error(f"OCR客户端初始化错误: {e}")
         raise
     finally:
         # 恢复环境变量
@@ -142,173 +147,181 @@ def extract_text_cloud(image_path, ocr_model):
             os.environ['HTTPS_PROXY'] = https_proxy
         if no_proxy:
             os.environ['NO_PROXY'] = no_proxy
-    
-    # 使用与AI demo.py一致的API调用方式
-    response = client.chat.completions.create(
-        model=ocr_model["name"],
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": OCR_PROMT,
-                    },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{image_base64}"
-                        },
-                    },
-                ],
-            }
-        ],
-    )
-    
-    # 获取OCR结果
-    text = response.choices[0].message.content
-    
+
+def parse_ocr_response(text):
+    """解析OCR返回的文本，提取句子和加粗单词"""
     # 移除markdown代码块标记
     text = re.sub(r'^```markdown\s*|\s*```$', '', text, flags=re.MULTILINE)
     
-    # 获取第一行作为标题
+    # 分割文本行
     lines = text.split('\n')
-    title = ''
-    if lines and lines[0].strip():
-        title = lines[0].strip()
+    title = lines[0].strip() if lines and lines[0].strip() else ''
     
     # 解析文本，提取句子和加粗单词
     sentences = []
     for i, line in enumerate(lines):
-        if line.strip():
-            # 使用正则表达式查找加粗单词（假设加粗单词被**包围）
-            bold_words = re.findall(r'\*\*(.*?)\*\*', line)
-            # 移除标记符号得到原始句子
-            clean_sentence = re.sub(r'\*\*', '', line)
+        if not line.strip():
+            continue
             
-            # 检查是否包含数字标号
-            has_number = bool(re.search(r'^\d+\.\s', clean_sentence.strip()))
-            
-            # 添加所有句子，包括一个标志表示是否有数字标号
-            sentences.append({
-                'text': clean_sentence.strip(),
-                'bold_words': bold_words,
-                'original_text': line.strip(),  # 保存原始带标记的文本
-                'has_number': has_number,
-                'is_title': i == 0,  # 标记第一行为标题
-                'title': title if i == 0 else ''  # 添加标题字段
-            })
+        # 提取加粗单词和清理句子
+        bold_words = re.findall(r'\*\*(.*?)\*\*', line)
+        clean_sentence = re.sub(r'\*\*', '', line)
+        
+        # 检查是否包含数字标号
+        has_number = bool(re.search(r'^\d+\.\s', clean_sentence.strip()))
+        
+        # 构建句子数据
+        sentences.append({
+            'text': clean_sentence.strip(),
+            'bold_words': bold_words,
+            'original_text': line.strip(),
+            'has_number': has_number,
+            'is_title': i == 0,
+            'title': title if i == 0 else ''
+        })
+    
     return sentences
 
-def generate_audio(text, filename, tts_model=None):
-    # 使用Google TTS
-    if tts_model["type"] == "gtts" and TTS_GTTS_AVAILABLE:
-        print(f"使用GTTS服务生成音频: {filename}")
-        return generate_audio_gtts(text, filename, tts_model)
-    # 使用阿里云Qwen TTS
-    if tts_model["type"] == "qwen-tts" and TTS_QWEN_AVAILABLE:
-        print(f"使用QWEN TTS服务生成音频: {filename}")
-        return generate_audio_qwen(text, filename, tts_model)
-    # 使用Azure TTS
-    if tts_model["type"] == "ms-tts" and TTS_AZURE_AVAILABLE:
-        print(f"使用Azure TTS服务生成音频: {filename}")
-        return generate_audio_azure(text, filename, tts_model)
+def extract_text_cloud(image_path, ocr_model):
+    """使用云API进行OCR识别"""
+    logger.info("使用云端OCR服务处理图片")
     
-    # 如果以上方式都不可用，创建空文件作为后备方案
-    print(f"警告: TTS服务不可用或未启用，无法生成音频")
+    try:
+        # 编码图片
+        image_base64 = encode_image_to_base64(image_path)
+        
+        # 初始化客户端
+        client = init_ocr_client(ocr_model)
+        
+        # 调用OCR API
+        response = client.chat.completions.create(
+            model=ocr_model["name"],
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": OCR_PROMPT},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                ]
+            }]
+        )
+        
+        # 解析OCR结果
+        text = response.choices[0].message.content
+        sentences = parse_ocr_response(text)
+        
+        logger.info(f"OCR识别成功，提取了{len(sentences)}个句子")
+        return sentences
+        
+    except Exception as e:
+        logger.error(f"OCR识别失败: {str(e)}")
+        raise
+
+def create_empty_audio(filename):
+    """创建空音频文件作为后备方案"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     with open(audio_path, 'wb') as audio_file:
         audio_file.write(b'')
     return audio_path
 
+def validate_text(text):
+    """验证文本是否有效"""
+    if not text or not text.strip():
+        raise ValueError("输入文本为空，无法生成音频")
+    return text.strip()
+
+def generate_audio(text, filename, tts_model=None):
+    """根据选择的TTS模型生成音频"""
+    try:
+        # 验证文本
+        text = validate_text(text)
+        
+        # 根据TTS类型选择相应的生成函数
+        if tts_model["type"] == "gtts" and TTS_GTTS_AVAILABLE:
+            logger.info(f"使用GTTS服务生成音频: {filename}")
+            return generate_audio_gtts(text, filename, tts_model)
+        elif tts_model["type"] == "qwen-tts" and TTS_QWEN_AVAILABLE:
+            logger.info(f"使用QWEN TTS服务生成音频: {filename}")
+            return generate_audio_qwen(text, filename, tts_model)
+        elif tts_model["type"] == "ms-tts" and TTS_AZURE_AVAILABLE:
+            logger.info(f"使用Azure TTS服务生成音频: {filename}")
+            return generate_audio_azure(text, filename, tts_model)
+        else:
+            logger.warning(f"警告: 所选TTS服务不可用或未启用，无法生成音频")
+            return create_empty_audio(filename)
+    except Exception as e:
+        logger.error(f"音频生成失败: {str(e)}")
+        return create_empty_audio(filename)
+
 def generate_audio_gtts(text, filename, tts_model=None):
-    """使用本地TTS库生成音频"""
+    """使用Google TTS库生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     if tts_model is None:
-        # 使用UK配置作为默认gtts配置
         tts_model = tts_models["UK"]
 
-    # 使用gTTS (需要网络连接，但质量较好)
-    tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_model["tld"], slow=False)
-    tts.save(audio_path)
-    return audio_path
+    try:
+        # 使用gTTS生成音频
+        tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_model["tld"], slow=False)
+        tts.save(audio_path)
+        logger.info(f"GTTS音频生成成功: {filename}")
+        return audio_path
+    except Exception as e:
+        logger.error(f"GTTS音频生成失败: {str(e)}")
+        return create_empty_audio(filename)
 
 def generate_audio_qwen(text, filename, tts_model=None):
     """使用阿里云TTS服务生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     if tts_model is None:
         tts_model = tts_models["Chinese"]
-    try:
-        # 检查输入文本是否为空
-        if not text or not text.strip():
-            raise ValueError("输入文本为空，无法生成音频")
-            
-        # 配置阿里云TTS模型和声音
-        dashscope.api_key = tts_model["key"]
-        model = tts_model["model"]  # 使用与API demo相同的模型
-        voice = tts_model["voice"]  # 使用与API demo相同的声音
         
-        # 初始化语音合成器
-        synthesizer = SpeechSynthesizer(model=model, voice=voice)
+    try:
+        # 配置阿里云TTS
+        dashscope.api_key = tts_model["key"]
+        synthesizer = SpeechSynthesizer(model=tts_model["model"], voice=tts_model["voice"])
         
         # 调用API生成音频
         audio = synthesizer.call(text)
         
-        # 检查返回的音频数据是否为None或空
-        if audio is None:
-            raise ValueError("TTS API返回了空数据(None)")
-        elif not audio:  # 检查是否为空字节
-            raise ValueError("TTS API返回了空字节")
+        # 验证返回的音频数据
+        if audio is None or not audio:
+            raise ValueError("TTS API返回了空数据")
             
-        # 输出请求指标信息
-        print(f"[TTS指标] 请求ID: {synthesizer.get_last_request_id()}, 首包延迟: {synthesizer.get_first_package_delay()}ms")
+        # 记录请求指标
+        logger.info(f"[TTS指标] 请求ID: {synthesizer.get_last_request_id()}, 首包延迟: {synthesizer.get_first_package_delay()}ms")
         
         # 保存音频文件
         with open(audio_path, 'wb') as f:
             f.write(audio)
             
-        print(f"云端TTS生成成功: {filename}")
+        logger.info(f"阿里云TTS生成成功: {filename}")
         return audio_path
     except Exception as e:
-        print(f"云端TTS生成失败: {str(e)}")
-       
-    # 失败后创建空文件作为后备方案
-    with open(audio_path, 'wb') as audio_file:
-        audio_file.write(b'')
-    return audio_path
-
+        logger.error(f"阿里云TTS生成失败: {str(e)}")
+        return create_empty_audio(filename)
 
 def generate_audio_azure(text, filename, tts_model=None):
     """使用Azure语音服务生成音频"""
     audio_path = os.path.join(AUDIO_FOLDER, filename)
     if tts_model is None:
         tts_model = tts_models["SG-man"]
+        
     try:
-        # 检查输入文本是否为空
-        if not text or not text.strip():
-            raise ValueError("输入文本为空，无法生成音频")
-        
         # 配置Azure语音服务
-        speech_key = tts_model["speech_key"]
-        service_region = tts_model["service_region"]
-        voice_name = tts_model["voice_name"]
-        speed_rate = tts_model["speed"]
+        speech_config = speechsdk.SpeechConfig(
+            subscription=tts_model["speech_key"], 
+            region=tts_model["service_region"]
+        )
+        speech_config.speech_synthesis_voice_name = tts_model["voice_name"]
         
-        # 创建语音配置
-        speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=service_region)
-        speech_config.speech_synthesis_voice_name = voice_name
-        
-        # 创建音频输出配置 - 使用文件输出而不是默认扬声器，以禁止自动播放
+        # 创建音频输出配置
         audio_config = speechsdk.audio.AudioOutputConfig(filename=audio_path)
-        
-        # 创建语音合成器 - 指定音频配置以禁止自动播放
         speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
         
-        # 使用SSML格式设置慢速语音
+        # 使用SSML格式设置语音
         ssml_text = f"""
 <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-    <voice name='{voice_name}'>
-        <prosody rate='{speed_rate}'>
+    <voice name='{tts_model["voice_name"]}'>
+        <prosody rate='{tts_model["speed"]}'>
             {text}
         </prosody>
     </voice>
@@ -320,188 +333,210 @@ def generate_audio_azure(text, filename, tts_model=None):
         
         # 检查结果
         if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            # 获取音频数据
-            audio_data = result.audio_data
-            
-            # 保存音频文件
             with open(audio_path, 'wb') as f:
-                f.write(audio_data)
-                
-            print(f"Azure TTS生成成功: {filename}")
+                f.write(result.audio_data)
+            logger.info(f"Azure TTS生成成功: {filename}")
             return audio_path
-        elif result.reason == speechsdk.ResultReason.Canceled:
-            cancellation_details = result.cancellation_details
-            print(f"Azure TTS合成取消: {cancellation_details.reason}")
-            if cancellation_details.reason == speechsdk.CancellationReason.Error:
-                print(f"错误详情: {cancellation_details.error_details}")
-            raise ValueError(f"Azure TTS合成失败: {cancellation_details.reason}")
         else:
-            raise ValueError(f"Azure TTS合成失败，未知原因: {result.reason}")
+            # 处理错误情况
+            if result.reason == speechsdk.ResultReason.Canceled:
+                details = result.cancellation_details
+                error_msg = f"Azure TTS取消: {details.reason}"
+                if details.reason == speechsdk.CancellationReason.Error:
+                    error_msg += f", 错误详情: {details.error_details}"
+                raise ValueError(error_msg)
+            else:
+                raise ValueError(f"Azure TTS失败，未知原因: {result.reason}")
     except Exception as e:
-        print(f"Azure TTS生成失败: {str(e)}")
+        logger.error(f"Azure TTS生成失败: {str(e)}")
+        return create_empty_audio(filename)
+
+
+
+def clean_audio_folder():
+    """清理音频文件夹中的所有MP3文件"""
+    try:
+        count = 0
+        for audio_file in os.listdir(AUDIO_FOLDER):
+            if audio_file.endswith('.mp3'):
+                audio_path = os.path.join(AUDIO_FOLDER, audio_file)
+                os.remove(audio_path)
+                count += 1
+        logger.info(f"已清理{count}个音频文件")
+        return True
+    except Exception as e:
+        logger.error(f"清理音频文件时出错: {e}")
+        return False
+
+def find_word_wall_index(sentences):
+    """查找'My Word Wall'部分的索引"""
+    for i, s in enumerate(sentences):
+        if s['text'].strip().startswith("My Word Wall"):
+            return i
+    return -1
+
+def process_bold_words(sentence, idx, tts_model):
+    """处理句子中的加粗单词，生成音频和HTML"""
+    word_audios = []
+    html_text = sentence['text']
     
-    # 失败后创建空文件作为后备方案
-    with open(audio_path, 'wb') as audio_file:
-        audio_file.write(b'')
-    return audio_path
+    if not sentence['bold_words'] or len(sentence['bold_words']) == 0:
+        return [], html_text, False
+    
+    for widx, word in enumerate(sentence['bold_words']):
+        try:
+            # 生成单词音频
+            word_audio = generate_audio(
+                word,
+                f'word_{idx}_{widx}.mp3',
+                tts_model
+            )
+            
+            # 添加到结果列表
+            word_audios.append({
+                'word': word,
+                'audio_path': f'/audio/word_{idx}_{widx}.mp3'
+            })
+            
+            # 创建带播放按钮的HTML
+            button_html = f'<span class="word-item bold" onclick="playAudio(\'word_{idx}_{widx}.mp3\')"><i class="bi bi-play-circle-fill"></i> {word}</span>'
+            
+            # 替换HTML中的单词
+            pattern = r'\b' + re.escape(word) + r'\b'
+            html_text = re.sub(pattern, button_html, html_text, count=1)
+            
+        except Exception as e:
+            logger.error(f"单词音频生成错误: {e}")
+            continue
+    
+    return word_audios, html_text, len(word_audios) > 0
 
-
+def process_sentence(sentence, idx, word_wall_index, tts_model, processed_count, total_sentences):
+    """处理单个句子，生成音频和数据结构"""
+    # 初始化基本信息
+    sentence_data = {
+        'text': sentence['text'],
+        'has_number': sentence.get('has_number', False),
+        'has_bold_words': False,
+        'html_text': sentence['text']
+    }
+    
+    # 判断是否需要生成音频（排除Word Wall后的内容）
+    if word_wall_index == -1 or idx < word_wall_index:
+        # 更新处理状态
+        processing_status = {
+            'status': 'processing',
+            'message': f'正在处理第 {processed_count}/{total_sentences} 个句子'
+        }
+        
+        # 生成整句音频
+        sentence_audio = generate_audio(
+            sentence['text'],
+            f'sentence_{idx}.mp3',
+            tts_model
+        )
+        sentence_data['audio_path'] = f'sentence_{idx}.mp3'
+        
+        # 处理加粗单词
+        if sentence['bold_words'] and len(sentence['bold_words']) > 0:
+            processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子的加粗单词'
+            word_audios, html_text, has_bold_words = process_bold_words(sentence, idx, tts_model)
+            
+            sentence_data['bold_words'] = word_audios
+            sentence_data['has_bold_words'] = has_bold_words
+            sentence_data['html_text'] = html_text
+    else:
+        # Word Wall后的内容不生成音频
+        sentence_data['has_bold_words'] = False
+        sentence_data['bold_words'] = []
+    
+    return sentence_data
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    """处理上传的图片文件，执行OCR和TTS"""
+    # 初始化处理状态
+    processing_status = {
+        'status': 'processing',
+        'message': '开始处理上传的图片'
+    }
+    
     try:
-        # 更新状态为处理中
-        processing_status = {
-            'status': 'processing',
-            'message': '开始处理上传的图片'
-        }
-        
+        # 验证上传文件
         if 'file' not in request.files:
-            processing_status['status'] = 'idle'
-            processing_status['message'] = '准备就绪'
             return jsonify({'error': '没有文件上传'}), 400
         
         file = request.files['file']
         if file.filename == '':
-            processing_status['status'] = 'idle'
-            processing_status['message'] = '准备就绪'
             return jsonify({'error': '未选择文件'}), 400
         
         # 保存上传的图片
         processing_status['message'] = '保存上传的图片'
         image_path = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(image_path)
+        logger.info(f"已保存图片: {image_path}")
         
-        # 清理之前生成的音频文件
+        # 清理之前的音频文件
         processing_status['message'] = '清理之前的音频文件'
-        try:
-            for audio_file in os.listdir(AUDIO_FOLDER):
-                if audio_file.endswith('.mp3'):
-                    audio_path = os.path.join(AUDIO_FOLDER, audio_file)
-                    os.remove(audio_path)
-                    print(f"已删除音频文件: {audio_path}")
-        except Exception as e:
-            print(f"清理音频文件时出错: {e}")
-            # 继续处理，不中断上传流程
+        clean_audio_folder()
         
-        # 处理图片并提取文本
+        # OCR处理
         try:
             processing_status['message'] = '正在进行OCR识别'
             ocr_model = get_selected_model(request, 'ocr')
             sentences = extract_text_cloud(image_path, ocr_model)
+            
             if not sentences:
-                processing_status['status'] = 'idle'
-                processing_status['message'] = '准备就绪'
                 return jsonify({'error': 'OCR识别失败，未能提取文本'}), 500
+                
         except Exception as e:
-            print(f"OCR处理错误: {e}")
-            processing_status['status'] = 'idle'
-            processing_status['message'] = '准备就绪'
+            logger.error(f"OCR处理错误: {e}")
             return jsonify({'error': f'OCR处理错误: {str(e)}'}), 500
         
-        # 为每个句子和加粗单词生成音频
+        # 音频生成
         processing_status['message'] = '正在生成音频'
         result = []
         
-        # 检查是否有"My Word Wall"部分
-        word_wall_index = -1
-        for i, s in enumerate(sentences):
-            if s['text'].strip().startswith("My Word Wall"):
-                word_wall_index = i
-                break
-                
-        # 计算需要处理的句子总数（排除My Word Wall后面的部分）
+        # 查找Word Wall部分
+        word_wall_index = find_word_wall_index(sentences)
+        
+        # 计算需要处理的句子总数
         total_sentences = len(sentences) if word_wall_index == -1 else word_wall_index
         processed_count = 0
+        tts_model = get_selected_model(request, 'tts')
         
+        # 处理每个句子
         for idx, sentence in enumerate(sentences):
             try:
-                # 初始化基本信息
-                sentence_data = {
-                    'text': sentence['text'],
-                    'has_number': sentence.get('has_number', False),
-                    'has_bold_words': False,
-                    'html_text': sentence['text']  # 初始化为原始文本
-                }
+                processed_count += 1 if (word_wall_index == -1 or idx < word_wall_index) else 0
                 
-                # 为所有句子生成音频，但排除My Word Wall后面的部分
-                if word_wall_index == -1 or idx < word_wall_index:
-                    processed_count += 1
-                    processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子'
-                
-                    # 生成整句音频
-                    tts_model = get_selected_model(request, 'tts')
-                    sentence_audio = generate_audio(
-                        sentence['text'],
-                        f'sentence_{idx}.mp3',
-                        tts_model
-                    )
-                    sentence_data['audio_path'] = f'sentence_{idx}.mp3'
-                    
-                    # 生成加粗单词的音频
-                    word_audios = []
-                    html_text = sentence['text']  # 初始化为原始文本
-                    
-                    if sentence['bold_words'] and len(sentence['bold_words']) > 0:
-                        processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子的加粗单词'
-                        
-                        for widx, word in enumerate(sentence['bold_words']):
-                            try:
-                                word_audio = generate_audio(
-                                    word,
-                                    f'word_{idx}_{widx}.mp3',
-                                    tts_model
-                                )
-                                word_audios.append({
-                                    'word': word,
-                                    'audio_path': f'/audio/word_{idx}_{widx}.mp3'
-                                })
-                                
-                                # 直接在句子中嵌入单词按钮
-                                # 创建一个带有播放按钮的HTML片段，替换原始单词
-                                # 使用正则表达式进行精确替换，避免替换句子中所有相同的单词
-                                button_html = f'<span class="word-item bold" onclick="playAudio(\'word_{idx}_{widx}.mp3\')"><i class="bi bi-play-circle-fill"></i> {word}</span>'
-                                # 使用正则表达式确保只替换完整的单词，而不是单词的一部分
-                                pattern = r'\b' + re.escape(word) + r'\b'
-                                # 只替换第一次出现的实例
-                                html_text = re.sub(pattern, button_html, html_text, count=1)
-                            except Exception as e:
-                                print(f"单词音频生成错误: {e}")
-                                # 继续处理其他单词
-                                continue
-                        
-                        sentence_data['bold_words'] = word_audios
-                        sentence_data['has_bold_words'] = len(word_audios) > 0
-                        sentence_data['html_text'] = html_text
-                else:
-                    # 非数字标号句子不生成音频，但仍然添加到结果中
-                    sentence_data['has_bold_words'] = False
-                    sentence_data['bold_words'] = []
+                # 处理句子
+                sentence_data = process_sentence(
+                    sentence, idx, word_wall_index, 
+                    tts_model, processed_count, total_sentences
+                )
                 
                 result.append(sentence_data)
             except Exception as e:
-                print(f"句子处理错误: {e}")
-                # 继续处理其他句子
+                logger.error(f"句子处理错误: {e}")
                 continue
         
-        # 检查是否有任何结果
+        # 验证结果
         if not result:
-            processing_status['status'] = 'idle'
-            processing_status['message'] = '准备就绪'
             return jsonify({'error': 'OCR识别失败，未能提取任何文本'}), 500
-            
+        
         # 检查是否有带数字标号的句子
         if not any(item.get('has_number', False) for item in result):
-            print("警告: 未找到带数字标号的句子，但仍返回所有识别出的文本")
-            # 继续处理，返回所有识别出的句子
+            logger.warning("未找到带数字标号的句子，但仍返回所有识别出的文本")
         
         # 更新状态为完成
         processing_status['status'] = 'done'
         processing_status['message'] = '处理完成'
+        logger.info(f"处理完成，共生成{len(result)}个句子数据")
             
         return jsonify(result)
     except Exception as e:
-        print(f"上传处理过程中发生错误: {e}")
+        logger.error(f"上传处理过程中发生错误: {e}")
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
 
 @app.route('/audio/<filename>')
