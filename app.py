@@ -4,6 +4,7 @@ import re
 import requests
 import json
 import base64
+import argparse
 import numpy as np
 import soundfile as sf
 import logging
@@ -56,16 +57,19 @@ ocr_ai_models = {
 
 # TTS服务配置字典
 tts_models = {
-    "Chinese": {
+    "Chinese-man": {
         "type": "qwen-tts",
         "key": os.environ.get("QWEN_API_KEY", "demo"),
         "model": "cosyvoice-v1",
-        "voice": "longxiaochun",
+        "voice": "longxiang",
+        "speed": "0.8",
     },
-    "UK": {
-        "type": "gtts",
-        "lang": "en",
-        "tld": "co.uk",
+    "Chinese-woman": {
+        "type": "qwen-tts",
+        "key": os.environ.get("QWEN_API_KEY", "demo"),
+        "model": "cosyvoice-v1",
+        "voice": "longjing",
+        "speed": "0.8",
     },
     "SG-man": {
         "type": "ms-tts",
@@ -81,6 +85,35 @@ tts_models = {
         "voice_name": "en-SG-LunaNeural",
         "speed": "-10%",
     },
+    "UK-man": {
+        "type": "ms-tts",
+        "speech_key": os.environ.get("AZURE_API_KEY", "demo"),
+        "service_region": "southeastasia",
+        "voice_name": "en-GB-OllieMultilingualNeural",
+        "speed": "-10%",
+    },
+    "UK-woman": {
+        "type": "ms-tts",
+        "speech_key": os.environ.get("AZURE_API_KEY", "demo"),
+        "service_region": "southeastasia",
+        "voice_name": "en-GB-LibbyNeural",
+        "speed": "-10%",
+    },
+    "UK-Google": {
+        "type": "gtts",
+        "lang": "en",
+        "tld": "co.uk",
+    },
+    "US-Google": {
+        "type": "gtts",
+        "lang": "en",
+        "tld": "com",
+    },
+    "French-Google": {
+        "type": "gtts",
+        "lang": "fr",
+        "tld": "fr",
+    },
 }
 
 # 模型配置
@@ -89,7 +122,7 @@ def get_selected_model(request, model_type):
         selected = request.form.get('ocr-select', 'gemini-ocr')
         return ocr_ai_models[selected]
     elif model_type == 'tts':
-        selected = request.form.get('tts-select', 'UK')
+        selected = request.form.get('tts-select', 'SG-man')
         return tts_models[selected]
 
 @app.route('/')
@@ -101,10 +134,6 @@ def index():
 
 # OCR提示词
 OCR_PROMPT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
-# 记录当前使用的OCR模型和API密钥
-logger.info(f"QWEN key: {ocr_ai_models['qwen-ocr']['key']}")
-logger.info(f"GOOGLE key: {ocr_ai_models['gemini-ocr']['key']}")
-
 
 # 确保上传和音频文件夹存在
 UPLOAD_FOLDER = 'uploads'
@@ -167,15 +196,11 @@ def parse_ocr_response(text):
         bold_words = re.findall(r'\*\*(.*?)\*\*', line)
         clean_sentence = re.sub(r'\*\*', '', line)
         
-        # 检查是否包含数字标号
-        has_number = bool(re.search(r'^\d+\.\s', clean_sentence.strip()))
-        
         # 构建句子数据
         sentences.append({
             'text': clean_sentence.strip(),
             'bold_words': bold_words,
             'original_text': line.strip(),
-            'has_number': has_number,
             'is_title': i == 0,
             'title': title if i == 0 else ''
         })
@@ -277,7 +302,7 @@ def generate_audio_qwen(text, filename, tts_model=None):
     try:
         # 配置阿里云TTS
         dashscope.api_key = tts_model["key"]
-        synthesizer = SpeechSynthesizer(model=tts_model["model"], voice=tts_model["voice"])
+        synthesizer = SpeechSynthesizer(model=tts_model["model"], voice=tts_model["voice"], speech_rate=tts_model["speed"])
         
         # 调用API生成音频
         audio = synthesizer.call(text)
@@ -416,7 +441,6 @@ def process_sentence(sentence, idx, word_wall_index, tts_model, processed_count,
     # 初始化基本信息
     sentence_data = {
         'text': sentence['text'],
-        'has_number': sentence.get('has_number', False),
         'has_bold_words': False,
         'html_text': sentence['text']
     }
@@ -525,10 +549,6 @@ def upload_file():
         if not result:
             return jsonify({'error': 'OCR识别失败，未能提取任何文本'}), 500
         
-        # 检查是否有带数字标号的句子
-        if not any(item.get('has_number', False) for item in result):
-            logger.warning("未找到带数字标号的句子，但仍返回所有识别出的文本")
-        
         # 更新状态为完成
         processing_status['status'] = 'done'
         processing_status['message'] = '处理完成'
@@ -562,7 +582,6 @@ def get_status():
     return jsonify(processing_status)
 
 if __name__ == '__main__':
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5001)), help='Port to run the server on')
     args = parser.parse_args()

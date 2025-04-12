@@ -78,10 +78,7 @@
             background-color: #f0f7ff; /* 悬停时背景色变化 */
             border-left-color: #0d6efd; /* 悬停时边框色变化 */
         }
-        .sentence-item.numbered {
-            border-left-color: #0d6efd; /* 带数字标号的句子使用主题色边框 */
-            background-color: #f0f7ff; /* 带数字标号的句子使用轻微的主题背景色 */
-        }
+        /* 删除了.sentence-item.numbered类，所有句子使用统一样式 */
         .word-item {
             display: inline-block;
             margin: 0.3rem; /* 从0.5rem减小到0.3rem */
@@ -156,10 +153,15 @@
     <div class="col-md-6">
         <label for="tts-select" class="form-label">TTS方式</label>
         <select class="form-select" id="tts-select">
-            <option value="Chinese">中文语音 (阿里云)</option>
-            <option value="UK" selected>英式英语 (Google)</option>
-            <option value="SG-man">新加坡英语-男声 (Azure)</option>
+            <option value="Chinese-man">中文-男声 (阿里云)</option>
+            <option value="Chinese-woman">中文-女声 (阿里云)</option>
+            <option value="SG-man" selected>新加坡英语-男声 (Azure)</option>
             <option value="SG-woman">新加坡英语-女声 (Azure)</option>
+            <option value="UK-man">英式英语-男声 (Azure)</option>
+            <option value="UK-woman">英式英语-女声 (Azure)</option>
+            <option value="UK-Google">英式英语 (Google)</option>
+            <option value="US-Google">美式英语 (Google)</option>
+            <option value="French-Google">法语 (Google)</option>
         </select>
     </div>
 </div>
@@ -351,8 +353,8 @@
                     // 判断是否有音频路径，有则添加播放按钮
                     if (sentence.audio_path) {
                         const sentenceDiv = document.createElement('div');
-                        // 如果是带标号的句子，添加numbered类
-                        sentenceDiv.className = sentence.has_number ? 'sentence-item numbered' : 'sentence-item';
+                        // 所有句子使用统一样式
+                        sentenceDiv.className = 'sentence-item';
                         
                         // 创建句子文本和播放按钮
                         const sentenceText = document.createElement('p');
