@@ -14,6 +14,9 @@ from openai import OpenAI
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# 设置Werkzeug日志级别为WARNING以隐藏访问日志
+logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
 # 导入阿里云TTS相关库
 try:
     from dashscope.audio.tts_v2 import SpeechSynthesizer
@@ -57,14 +60,14 @@ ocr_ai_models = {
 
 # TTS服务配置字典
 tts_models = {
-    "Chinese-man": {
+    "Qwen-man": {
         "type": "qwen-tts",
         "key": os.environ.get("QWEN_API_KEY", "demo"),
         "model": "cosyvoice-v1",
         "voice": "longxiang",
         "speed": "0.8",
     },
-    "Chinese-woman": {
+    "Qwen-woman": {
         "type": "qwen-tts",
         "key": os.environ.get("QWEN_API_KEY", "demo"),
         "model": "cosyvoice-v1",
@@ -99,6 +102,13 @@ tts_models = {
         "voice_name": "en-GB-LibbyNeural",
         "speed": "-10%",
     },
+    "CH-man": {
+        "type": "ms-tts",
+        "speech_key": os.environ.get("AZURE_API_KEY", "demo"),
+        "service_region": "southeastasia",
+        "voice_name": "zh-CN-YunyangNeural",
+        "speed": "-20%",
+    },
     "UK-Google": {
         "type": "gtts",
         "lang": "en",
@@ -113,6 +123,11 @@ tts_models = {
         "type": "gtts",
         "lang": "fr",
         "tld": "fr",
+    },
+    "Chinese-Google": {
+        "type": "gtts",
+        "lang": "zh",
+        "tld": "com",
     },
 }
 
@@ -448,9 +463,13 @@ def process_sentence(sentence, idx, word_wall_index, tts_model, processed_count,
     # 判断是否需要生成音频（排除Word Wall后的内容）
     if word_wall_index == -1 or idx < word_wall_index:
         # 更新处理状态
+        global processing_status
         processing_status = {
             'status': 'processing',
-            'message': f'正在处理第 {processed_count}/{total_sentences} 个句子'
+            'message': f'正在处理第 {processed_count}/{total_sentences} 个句子',
+            'current': processed_count,
+            'total': total_sentences,
+            'progress': int((processed_count / total_sentences) * 100)
         }
         
         # 生成整句音频
@@ -529,10 +548,20 @@ def upload_file():
         processed_count = 0
         tts_model = get_selected_model(request, 'tts')
         
+        # 更新处理状态中的总句子数
+        processing_status['total'] = total_sentences
+        processing_status['current'] = 0
+        processing_status['progress'] = 0
+        
         # 处理每个句子
         for idx, sentence in enumerate(sentences):
             try:
                 processed_count += 1 if (word_wall_index == -1 or idx < word_wall_index) else 0
+                
+                # 更新处理状态中的当前进度
+                if word_wall_index == -1 or idx < word_wall_index:
+                    processing_status['current'] = processed_count
+                    processing_status['progress'] = int((processed_count / total_sentences) * 100)
                 
                 # 处理句子
                 sentence_data = process_sentence(
@@ -552,6 +581,9 @@ def upload_file():
         # 更新状态为完成
         processing_status['status'] = 'done'
         processing_status['message'] = '处理完成'
+        processing_status['current'] = total_sentences
+        processing_status['total'] = total_sentences
+        processing_status['progress'] = 100
         logger.info(f"处理完成，共生成{len(result)}个句子数据")
             
         return jsonify(result)
@@ -571,7 +603,10 @@ def serve_audio(filename):
 def init_processing_status():
     return {
         'status': 'idle',  # idle, processing, done
-        'message': '准备就绪'
+        'message': '准备就绪',
+        'current': 0,
+        'total': 0,
+        'progress': 0
     }
 
 # 创建处理状态实例

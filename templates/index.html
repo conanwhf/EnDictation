@@ -138,7 +138,7 @@
 </head>
 <body>
     <div class="container">
-        <h1>中英文听写练习</h1>
+        <h1>中英法文听写练习</h1>
         <div class="upload-area" id="upload-area">
             <p>拖放图片到此处或点击选择文件</p>
             <input type="file" id="file-input" class="d-none" accept="image/*">
@@ -153,15 +153,15 @@
     <div class="col-md-6">
         <label for="tts-select" class="form-label">TTS方式</label>
         <select class="form-select" id="tts-select">
-            <option value="Chinese-man">中文-男声 (阿里云)</option>
-            <option value="Chinese-woman">中文-女声 (阿里云)</option>
-            <option value="SG-man" selected>新加坡英语-男声 (Azure)</option>
-            <option value="SG-woman">新加坡英语-女声 (Azure)</option>
-            <option value="UK-man">英式英语-男声 (Azure)</option>
-            <option value="UK-woman">英式英语-女声 (Azure)</option>
+            <option value="SG-man" selected>新加坡英语-男声 (Microsoft)</option>
+            <option value="SG-woman">新加坡英语-女声 (Microsoft)</option>
+            <option value="UK-man">英式英语/中文-男声 (Microsoft)</option>
+            <option value="UK-woman">英式英语/中文-女声 (Microsoft)</option>
+            <option value="CH-man">中文-男声 (Microsoft)</option>
             <option value="UK-Google">英式英语 (Google)</option>
             <option value="US-Google">美式英语 (Google)</option>
             <option value="French-Google">法语 (Google)</option>
+            <option value="Chinese-Google">中文 (Google)</option>
         </select>
     </div>
 </div>
@@ -174,6 +174,9 @@
                 <span class="visually-hidden">加载中...</span>
             </div>
             <p class="mt-2" id="status-message">正在处理图片，请稍候...</p>
+            <div class="progress mt-3" style="display: none;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
         </div>
         
         <div id="result-container">
@@ -307,23 +310,64 @@
             }
             
             // 检查处理状态
+            let isProcessing = false;
+            let lastUpdateTime = 0;
+            const UPDATE_THRESHOLD = 500; // 更新阈值，单位毫秒
+
             function checkProcessStatus() {
                 const statusMessage = document.getElementById('status-message');
+                const progressBar = document.querySelector('.progress');
+                const progressBarInner = document.querySelector('.progress-bar');
+                const currentTime = Date.now();
+
+                // 如果正在处理中或者距离上次更新时间太短，则跳过本次更新
+                if (isProcessing || (currentTime - lastUpdateTime) < UPDATE_THRESHOLD) {
+                    setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
+                    return;
+                }
+
+                isProcessing = true;
+                lastUpdateTime = currentTime;
                 
                 fetch('/status')
                     .then(response => response.json())
                     .then(data => {
                         if (data.status) {
-                            statusMessage.textContent = data.message;
+                            // 只在页面准备就绪时更新状态信息
+                            if (document.readyState === 'complete') {
+                                statusMessage.textContent = data.message;
+                                
+                                // 检查是否有进度信息
+                                if (data.current > 0 && data.total > 0) {
+                                    const progress = data.progress || Math.round((data.current / data.total) * 100);
+                                    
+                                    // 显示进度条
+                                    progressBar.style.display = 'block';
+                                    progressBarInner.style.width = `${progress}%`;
+                                    progressBarInner.setAttribute('aria-valuenow', progress);
+                                    
+                                    // 添加进度信息到状态消息
+                                    if (!data.message.includes('正在处理第')) {
+                                        statusMessage.textContent = `${data.message} - 正在处理第 ${data.current}/${data.total} 个句子 (${progress}%)`;
+                                    }
+                                }
+                            }
                             
                             // 如果处理未完成，继续检查
                             if (data.status !== 'done') {
-                                setTimeout(checkProcessStatus, 1000);
+                                setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
+                            } else {
+                                // 处理完成后隐藏进度条
+                                setTimeout(() => {
+                                    progressBar.style.display = 'none';
+                                }, UPDATE_THRESHOLD);
                             }
                         }
+                        isProcessing = false;
                     })
                     .catch(error => {
                         console.error('状态检查错误:', error);
+                        isProcessing = false;
                     });
             }
             
