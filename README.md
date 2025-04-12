@@ -1,19 +1,21 @@
-# 英文听写练习应用
+# 多语言听写练习应用
 
-这是一个基于Web的听写练习应用，允许用户上传听写列表的图片，自动识别其中的句子和加粗或特别标记的单词，并为每个句子和重点单词生成英式发音的音频。
+这是一个基于Web的听写练习应用，允许用户上传听写列表的图片，自动识别其中的句子和加粗或特别标记的单词，并为每个句子和重点单词生成选定语言和口音的音频。
+也可通过自行添加下划线、圈出来等方式指定重点单词。
 
 ## 功能特点
 
 - 图片上传：支持拖放或选择文件上传英文听写列表图片
 - OCR识别：自动识别图片中的文本内容和加粗单词
-- 英式发音：为每个句子和重点单词生成自然清晰的英式发音
+- 多语言支持：选定语言和口音，为每个句子和重点单词生成自然清晰的发音
 - 音频播放：提供简洁的播放界面，可选择性播放句子或单词
 
 ## 技术实现
 
 - 前端：HTML, CSS, JavaScript, Bootstrap 5
 - 后端：Flask (Python)
-- OCR和TTS：通过Qwen-omni-turbo API实现
+- OCR以及重点单词识别：通过Google、Qwen的多模态大模型实现
+- TTS：通过Google、Microsoft等提供的API实现
 
 ## 依赖库清单
 
@@ -21,6 +23,7 @@
 
 ### 核心依赖
 - Flask: Web应用框架
+- Flask-CORS: 跨域请求处理
 - requests: HTTP请求库
 - openai: 通过API调用Qwen模型
 - numpy: 数据处理
@@ -64,8 +67,13 @@
 
 1. 启动应用：`python app.py`
 2. 在浏览器中访问：`http://localhost:5000`
-3. 上传英文听写列表图片
+3. 上传英文听写列表图片（建议分辨率不低于1920x1080）
 4. 等待处理完成后，可以播放句子和单词的音频
+
+### 使用限制
+- API版本每日限频100次（如需增加配额请配置自有API密钥）
+- 本地OCR识别准确率依赖图像质量（推荐使用清晰度≥300dpi的图片）
+- 音频生成单次请求限制10分钟以内内容
 
 ## API配置
 
@@ -89,6 +97,13 @@ export AZURE_API_KEY="您的Azure API密钥"
 ## Azure App Service 部署说明
 
 本应用已适配Azure App Service，可以按照以下步骤进行部署：
+
+### 必要配置
+
+在Azure门户的应用设置中必须配置：
+- `FLASK_ENV=production`
+- `FLASK_APP=app.py`
+- `UPLOAD_FOLDER=/home/site/wwwroot/uploads`
 
 ### 前提条件
 
@@ -155,7 +170,13 @@ export AZURE_API_KEY="您的Azure API密钥"
 ## 目录结构
 
 - `app.py`: 主应用程序
-- `templates/index.html`: 前端界面
-- `uploads/`: 上传的图片存储目录
-- `audio/`: 生成的音频文件存储目录
-- `demo.jpg`: 示例图片
+- `requirements.txt`: 依赖库清单
+- `static/`: 静态资源目录
+  - `css/`: 样式表文件
+  - `js/`: JavaScript脚本
+- `templates/`: 前端模板
+  - `index.html`: 主界面
+- `uploads/`: 图片上传目录
+- `.deployment`: Azure部署配置
+- `web.config`: IIS服务器配置
+- `startup.sh`: 应用启动脚本
