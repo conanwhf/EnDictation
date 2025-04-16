@@ -137,7 +137,7 @@ def get_selected_model(request, model_type):
         selected = request.form.get('ocr-select', 'gemini-ocr')
         return ocr_ai_models[selected]
     elif model_type == 'tts':
-        selected = request.form.get('tts-select', 'SG-man')
+        selected = request.form.get('tts-select', 'UK-Google')
         return tts_models[selected]
 
 @app.route('/')
