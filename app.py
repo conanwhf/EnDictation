@@ -54,7 +54,7 @@ ocr_ai_models = {
     "gemini-ocr": {
         "key": os.environ.get("GOOGLE_API_KEY", "demo"),
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "name": "gemini-2.0-flash",
+        "name": "gemini-flash-lastest",
     },
 }
 
@@ -408,13 +408,6 @@ def clean_audio_folder():
         logger.error(f"清理音频文件时出错: {e}")
         return False
 
-def find_word_wall_index(sentences):
-    """查找'My Word Wall'部分的索引"""
-    for i, s in enumerate(sentences):
-        if s['text'].strip().startswith("My Word Wall"):
-            return i
-    return -1
-
 def process_bold_words(sentence, idx, tts_model):
     """处理句子中的加粗单词，生成音频和HTML"""
     word_audios = []
@@ -451,7 +444,7 @@ def process_bold_words(sentence, idx, tts_model):
     
     return word_audios, html_text, len(word_audios) > 0
 
-def process_sentence(sentence, idx, word_wall_index, tts_model, processed_count, total_sentences):
+def process_sentence(sentence, idx, tts_model, processed_count, total_sentences):
     """处理单个句子，生成音频和数据结构"""
     # 初始化基本信息
     sentence_data = {
@@ -460,39 +453,33 @@ def process_sentence(sentence, idx, word_wall_index, tts_model, processed_count,
         'html_text': sentence['text']
     }
     
-    # 判断是否需要生成音频（排除Word Wall后的内容）
-    if word_wall_index == -1 or idx < word_wall_index:
-        # 更新处理状态
-        global processing_status
-        processing_status = {
-            'status': 'processing',
-            'message': f'正在处理第 {processed_count}/{total_sentences} 个句子',
-            'current': processed_count,
-            'total': total_sentences,
-            'progress': int((processed_count / total_sentences) * 100)
-        }
-        
-        # 生成整句音频
-        sentence_audio = generate_audio(
-            sentence['text'],
-            f'sentence_{idx}.mp3',
-            tts_model
-        )
-        sentence_data['audio_path'] = f'sentence_{idx}.mp3'
-        
-        # 处理加粗单词
-        if sentence['bold_words'] and len(sentence['bold_words']) > 0:
-            processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子的加粗单词'
-            word_audios, html_text, has_bold_words = process_bold_words(sentence, idx, tts_model)
-            
-            sentence_data['bold_words'] = word_audios
-            sentence_data['has_bold_words'] = has_bold_words
-            sentence_data['html_text'] = html_text
-    else:
-        # Word Wall后的内容不生成音频
-        sentence_data['has_bold_words'] = False
-        sentence_data['bold_words'] = []
+    # 更新处理状态
+    global processing_status
+    processing_status = {
+        'status': 'processing',
+        'message': f'正在处理第 {processed_count}/{total_sentences} 个句子',
+        'current': processed_count,
+        'total': total_sentences,
+        'progress': int((processed_count / total_sentences) * 100)
+    }
     
+    # 生成整句音频 (不再有Word Wall的跳过逻辑)
+    sentence_audio = generate_audio(
+        sentence['text'],
+        f'sentence_{idx}.mp3',
+        tts_model
+    )
+    sentence_data['audio_path'] = f'sentence_{idx}.mp3'
+    
+    # 处理加粗单词
+    if sentence['bold_words'] and len(sentence['bold_words']) > 0:
+        processing_status['message'] = f'正在处理第 {processed_count}/{total_sentences} 个句子的加粗单词'
+        word_audios, html_text, has_bold_words = process_bold_words(sentence, idx, tts_model)
+        
+        sentence_data['bold_words'] = word_audios
+        sentence_data['has_bold_words'] = has_bold_words
+        sentence_data['html_text'] = html_text
+        
     return sentence_data
 
 @app.route('/upload', methods=['POST'])
@@ -540,11 +527,8 @@ def upload_file():
         processing_status['message'] = '正在生成音频'
         result = []
         
-        # 查找Word Wall部分
-        word_wall_index = find_word_wall_index(sentences)
-        
-        # 计算需要处理的句子总数
-        total_sentences = len(sentences) if word_wall_index == -1 else word_wall_index
+        # 计算需要处理的句子总数 (现在是所有句子)
+        total_sentences = len(sentences)
         processed_count = 0
         tts_model = get_selected_model(request, 'tts')
         
@@ -556,16 +540,15 @@ def upload_file():
         # 处理每个句子
         for idx, sentence in enumerate(sentences):
             try:
-                processed_count += 1 if (word_wall_index == -1 or idx < word_wall_index) else 0
+                processed_count += 1 
                 
                 # 更新处理状态中的当前进度
-                if word_wall_index == -1 or idx < word_wall_index:
-                    processing_status['current'] = processed_count
-                    processing_status['progress'] = int((processed_count / total_sentences) * 100)
+                processing_status['current'] = processed_count
+                processing_status['progress'] = int((processed_count / total_sentences) * 100)
                 
-                # 处理句子
+                # 处理句子 (移除 word_wall_index 参数)
                 sentence_data = process_sentence(
-                    sentence, idx, word_wall_index, 
+                    sentence, idx, 
                     tts_model, processed_count, total_sentences
                 )
                 
