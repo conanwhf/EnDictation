@@ -54,7 +54,7 @@ ocr_ai_models = {
     "gemini-ocr": {
         "key": os.environ.get("GOOGLE_API_KEY", "demo"),
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "name": "gemini-flash-lastest",
+        "name": "gemini-2.5-flash",
     },
 }
 
