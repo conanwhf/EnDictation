@@ -128,6 +128,17 @@
         #result-container {
             display: none;
         }
+        #tts-controls {
+            display: none;
+            margin-bottom: 1.5rem;
+            padding: 1rem 1.2rem;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+        }
+        #speed-help {
+            min-height: 1.5rem;
+        }
         #status-message {
             font-size: 1.2rem; /* 增大状态消息字体 */
             margin-top: 1rem;
@@ -149,23 +160,7 @@
                 </ul>
             </div>
             <input type="file" id="file-input" class="d-none" accept="image/*">
-            <div class="row mb-3">
-    <div class="col-md-12">
-        <label for="tts-select" class="form-label">TTS方式</label>
-        <select class="form-select" id="tts-select">
-            <option value="SG-man">新加坡英语-男声 (Microsoft)</option>
-            <option value="SG-woman">新加坡英语-女声 (Microsoft)</option>
-            <option value="UK-man">英式英语/中文-男声 (Microsoft)</option>
-            <option value="UK-woman">英式英语/中文-女声 (Microsoft)</option>
-            <option value="CH-man">中文-男声 (Microsoft)</option>
-            <option value="UK-Google" selected>英式英语 (Google)</option>
-            <option value="US-Google">美式英语 (Google)</option>
-            <option value="French-Google">法语 (Google)</option>
-            <option value="Chinese-Google">中文 (Google)</option>
-        </select>
-    </div>
-</div>
-<button class="btn btn-primary" id="select-file-btn">选择图片</button>
+            <button class="btn btn-primary" id="select-file-btn">选择图片</button>
             <img id="preview-image" class="mt-3" alt="预览图片">
         </div>
         
@@ -176,6 +171,29 @@
             <p class="mt-2" id="status-message">正在处理图片，请稍候...</p>
             <div class="progress mt-3" style="display: none;">
                 <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+        </div>
+
+        <div id="tts-controls">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                    <label for="tts-select" class="form-label">TTS方式</label>
+                    <select class="form-select" id="tts-select">
+                        {% for option in tts_options %}
+                        <option value="{{ option.id }}" {% if option.id == 'UK-Google' %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label for="speed-range" class="form-label">速度：<span id="speed-value">1.00x</span></label>
+                    <input type="range" class="form-range" id="speed-range" min="-50" max="50" step="5" value="0">
+                    <div class="form-text" id="speed-help"></div>
+                </div>
+                <div class="col-md-2 d-grid">
+                    <button class="btn btn-primary" id="generate-tts-btn" disabled>
+                        生成TTS
+                    </button>
+                </div>
             </div>
         </div>
         
@@ -194,6 +212,22 @@
             const loading = document.getElementById('loading');
             const resultContainer = document.getElementById('result-container');
             const sentencesContainer = document.getElementById('sentences-container');
+            const ttsControls = document.getElementById('tts-controls');
+            const ttsSelect = document.getElementById('tts-select');
+            const speedRange = document.getElementById('speed-range');
+            const speedValue = document.getElementById('speed-value');
+            const speedHelp = document.getElementById('speed-help');
+            const generateTtsBtn = document.getElementById('generate-tts-btn');
+            const ttsOptions = {{ tts_options|tojson }};
+            const ttsOptionMap = Object.fromEntries(ttsOptions.map(option => [option.id, option]));
+            let currentOcrData = [];
+
+            updateSpeedControl();
+            ttsSelect.addEventListener('change', updateSpeedControl);
+            speedRange.addEventListener('input', function() {
+                speedValue.textContent = formatSpeedLabel(speedRange.value);
+            });
+            generateTtsBtn.addEventListener('click', generateTts);
             
             // 点击选择文件按钮
             selectFileBtn.addEventListener('click', function() {
@@ -245,6 +279,32 @@
                     handleFiles(fileInput.files);
                 }
             });
+
+            function formatSpeedLabel(value) {
+                const speed = 1 + Number(value) / 100;
+                return `${speed.toFixed(2)}x`;
+            }
+
+            function updateSpeedControl() {
+                const option = ttsOptionMap[ttsSelect.value];
+                const supportsSpeed = option && option.supports_speed;
+                const defaultSpeed = option ? option.default_speed : 0;
+
+                speedRange.value = defaultSpeed;
+                speedRange.disabled = !supportsSpeed;
+                speedValue.textContent = supportsSpeed ? formatSpeedLabel(defaultSpeed) : '不可调';
+                speedHelp.textContent = supportsSpeed ? 'Microsoft TTS 支持按该速度生成。' : '当前引擎不支持速度调整。';
+            }
+
+            function escapeHtml(text) {
+                const span = document.createElement('span');
+                span.textContent = text || '';
+                return span.innerHTML;
+            }
+
+            function formatMarkdownText(text) {
+                return escapeHtml(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            }
             
             function handleFiles(files) {
                 const file = files[0];
@@ -267,12 +327,11 @@
             function uploadFile(file) {
                 const formData = new FormData();
                 formData.append('file', file);
-                
-                // 添加TTS选择器的值到表单数据
-                const ttsSelect = document.getElementById('tts-select');
-                formData.append('tts-select', ttsSelect.value);
-                
+
                 // 显示加载中
+                currentOcrData = [];
+                ttsControls.style.display = 'none';
+                generateTtsBtn.disabled = true;
                 loading.style.display = 'block';
                 resultContainer.style.display = 'none';
                 const statusMessage = document.getElementById('status-message');
@@ -284,7 +343,9 @@
                 })
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error('网络响应不正常');
+                        return response.json().then(data => {
+                            throw new Error(data.error || '网络响应不正常');
+                        });
                     }
                     statusMessage.textContent = 'OCR识别中，请稍候...';
                     return response.json();
@@ -292,9 +353,12 @@
                 .then(data => {
                     // 隐藏加载中
                     loading.style.display = 'none';
+                    currentOcrData = data;
                     
                     // 显示结果
                     displayResults(data);
+                    ttsControls.style.display = 'block';
+                    generateTtsBtn.disabled = false;
                     resultContainer.style.display = 'block';
                 })
                 .catch(error => {
@@ -304,6 +368,58 @@
                 });
                 
                 // 添加状态更新检查
+                checkProcessStatus();
+            }
+
+            function generateTts() {
+                if (!currentOcrData.length) {
+                    alert('请先上传图片并完成OCR识别');
+                    return;
+                }
+
+                const payload = {
+                    sentences: currentOcrData,
+                    tts_select: ttsSelect.value,
+                    speed: Number(speedRange.value)
+                };
+
+                loading.style.display = 'block';
+                resultContainer.style.display = 'block';
+                generateTtsBtn.disabled = true;
+                generateTtsBtn.textContent = '生成中...';
+                const statusMessage = document.getElementById('status-message');
+                statusMessage.textContent = '正在生成TTS音频，请稍候...';
+
+                fetch('/generate-tts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.error || 'TTS生成失败');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    loading.style.display = 'none';
+                    displayResults(data);
+                    resultContainer.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('TTS Error:', error);
+                    loading.style.display = 'none';
+                    alert('生成TTS时出错: ' + error.message);
+                })
+                .finally(() => {
+                    generateTtsBtn.disabled = false;
+                    generateTtsBtn.textContent = '生成TTS';
+                });
+
                 checkProcessStatus();
             }
             
@@ -428,14 +544,14 @@
                         sentenceDiv.appendChild(sentenceText);
                         
                         // 如果有加粗单词但没有在html_text中处理，则添加单词按钮区域
-                        if (sentence.has_bold_words && sentence.bold_words && sentence.bold_words.length > 0 && !sentence.html_text.includes('word-item')) {
+                        if (sentence.has_bold_words && sentence.bold_words && sentence.bold_words.length > 0 && !(sentence.html_text || '').includes('word-item')) {
                             const wordsContainer = document.createElement('div');
                             wordsContainer.className = 'words-container mt-2';
                             
                             sentence.bold_words.forEach(wordObj => {
                                 const wordBtn = document.createElement('span');
                                 wordBtn.className = 'word-item bold';
-                                wordBtn.innerHTML = `<i class="bi bi-play-circle-fill"></i> ${wordObj.word}`;
+                                wordBtn.innerHTML = `<i class="bi bi-play-circle-fill"></i> ${escapeHtml(wordObj.word)}`;
                                 wordBtn.onclick = function() {
                                     window.playAudio(wordObj.audio_path);
                                 };
@@ -449,13 +565,12 @@
                     } else {
                         // 没有音频的句子直接显示，保留markdown格式
                         const textDiv = document.createElement('div');
-                        textDiv.className = 'mb-3';
+                        textDiv.className = 'sentence-item';
                         
                         // 使用original_text保留markdown格式
                         if (sentence.original_text) {
                             // 将markdown中的**转换为HTML的<strong>标签
-                            let formattedText = sentence.original_text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-                            textDiv.innerHTML = formattedText;
+                            textDiv.innerHTML = formatMarkdownText(sentence.original_text);
                         } else {
                             textDiv.textContent = sentence.text;
                         }

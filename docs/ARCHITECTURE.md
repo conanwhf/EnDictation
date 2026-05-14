@@ -2,7 +2,7 @@
 
 ## 项目简介
 
-EnDictation 是一个 Web 听写练习应用。用户上传听写列表图片，应用自动 OCR 识别文本和重点单词，并为每个句子和单词生成 TTS 音频。
+EnDictation 是一个 Web 听写练习应用。用户上传听写列表图片，应用自动 OCR 识别文本和重点单词，再按用户选择为每个句子和单词生成 TTS 音频。
 
 ---
 
@@ -13,6 +13,9 @@ EnDictation 是一个 Web 听写练习应用。用户上传听写列表图片，
 │   浏览器      │ ──────────────────►   │   Flask App   │
 │  (index.html)│ ◄──────────────────  │   (app.py)    │
 └──────┬───────┘     JSON 结果         └──────┬───────┘
+       │                                      │
+       │  POST /generate-tts                  │
+       │──────────────────────────────────────►
        │                                      │
        │  GET /audio/*.mp3                    │
        │──────────────────────────────────────┘
@@ -57,7 +60,7 @@ EnDictation/
 ### 图片上传处理 (`POST /upload`)
 
 ```
-1. 接收图片文件 + TTS 模型选择
+1. 接收图片文件
 2. safe_filename() 清理文件名，保存到 uploads/
 3. clean_audio_folder() 清理上一次生成的音频
 4. 调用 Gemini API 进行 OCR
@@ -66,10 +69,21 @@ EnDictation/
    ├─ 移除代码块标记
    ├─ 按行分割，提取 **加粗单词**
    └─ 首行作为标题
-6. 遍历每个句子：
+6. 返回 OCR JSON 数组给前端
+```
+
+### TTS 生成 (`POST /generate-tts`)
+
+```
+1. 接收前端保存的 OCR JSON + TTS 模型 + 速度
+2. 根据模型能力决定是否使用速度参数
+   ├─ Microsoft TTS: 速度滑条值转成 Azure SSML rate
+   └─ Google gTTS: 忽略速度，前端禁用滑条
+3. clean_audio_folder() 清理上一次生成的音频
+4. 遍历非标题句子：
    ├─ generate_audio() 生成整句音频
    └─ process_bold_words() 为每个加粗单词生成音频
-7. 返回 JSON 数组给前端
+5. 返回带 audio_path 的 JSON 数组给前端
 ```
 
 ### 进度查询 (`GET /status`)
@@ -115,9 +129,9 @@ EnDictation/
 
 | 函数 | 说明 |
 |------|------|
-| `generate_audio(text, filename, tts_model)` | 路由函数，根据 `tts_model["type"]` 分发到具体实现 |
+| `generate_audio(text, filename, tts_model, speed_percent)` | 路由函数，根据 `tts_model["type"]` 分发到具体实现 |
 | `generate_audio_gtts(text, filename, tts_model)` | Google TTS，通过 gTTS 库调用，免费无需密钥 |
-| `generate_audio_azure(text, filename, tts_model)` | Azure TTS，使用 SSML 格式控制语速和音色 |
+| `generate_audio_azure(text, filename, tts_model, speed_percent)` | Azure TTS，使用 SSML 格式控制语速和音色 |
 
 所有 TTS 函数失败时均返回空文件（`create_empty_audio`），不中断整体流程。
 
@@ -137,7 +151,8 @@ EnDictation/
 
 单页面，无框架依赖，使用 Bootstrap 5 布局：
 
-- **上传区域**: 支持拖放和点击选择，含 TTS 模型下拉选择器
+- **上传区域**: 支持拖放和点击选择，只触发 OCR
+- **TTS 控件**: OCR 完成后显示，含 TTS 模型下拉、速度滑条和生成按钮
 - **加载指示器**: spinner + 进度条，通过轮询 `/status` 更新
 - **结果区域**: 动态渲染句子列表，每句含播放按钮和重点单词按钮
 
@@ -146,7 +161,8 @@ EnDictation/
 | 函数 | 说明 |
 |------|------|
 | `handleFiles(files)` | 验证文件类型，显示预览，触发上传 |
-| `uploadFile(file)` | 构建 FormData（含 TTS 选择），POST 到 `/upload`，启动状态轮询 |
+| `uploadFile(file)` | 构建 FormData，POST 到 `/upload`，启动状态轮询 |
+| `generateTts()` | 将当前 OCR 结果、TTS 选择和速度 POST 到 `/generate-tts` |
 | `checkProcessStatus()` | 每 500ms 轮询 `/status`，更新进度条和状态文字 |
 | `displayResults(data)` | 将 JSON 结果渲染为带播放按钮的句子列表 |
 | `playAudio(audioPath)` | 创建 `<audio>` 元素播放音频，播完自动移除 |
