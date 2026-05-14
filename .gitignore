@@ -1,12 +1,19 @@
-# 忽略音频文件
+# 音频和图片文件
 *.mp3
-
-# 忽略图片文件
 *.jpg
 *.jpeg
 
-# 忽略上传文件夹
+# 运行时目录
 /uploads/
-
-# 忽略音频文件夹
 /audio/
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+
+# 虚拟环境
+venv/
+.venv/
