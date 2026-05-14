@@ -3,6 +3,7 @@ import html
 import os
 import re
 import argparse
+import json
 import logging
 import unicodedata
 import uuid
@@ -27,51 +28,111 @@ except ImportError:
     logger.warning("gtts库未安装，Google TTS功能不可用")
     TTS_GTTS_AVAILABLE = False
 
+try:
+    from google.cloud import texttospeech
+    from google.oauth2 import service_account
+    TTS_GOOGLE_CLOUD_AVAILABLE = True
+except ImportError:
+    logger.warning("google-cloud-texttospeech库未安装，Google Cloud TTS功能不可用")
+    TTS_GOOGLE_CLOUD_AVAILABLE = False
+
 app = Flask(__name__)
 
 OCR_MODEL = "gemini-3-flash-preview"
+
+def get_env_first(*names, default=None):
+    """按顺序读取第一个非空环境变量"""
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+GEMINI_API_KEY = get_env_first("GOOGLE_API_KEY", "GEMINI_API_KEY")
+AZURE_SPEECH_KEY = get_env_first("AZURE_API_KEY", "AZURE_SPEECH_KEY", "SPEECH_KEY")
+AZURE_SPEECH_REGION = get_env_first("AZURE_SPEECH_REGION", "AZURE_SERVICE_REGION", default="southeastasia")
 
 # TTS服务配置字典
 tts_models = {
     "SG-man": {
         "label": "新加坡英语-男声 (Microsoft)",
         "type": "ms-tts",
-        "speech_key": os.environ.get("AZURE_API_KEY"),
-        "service_region": "southeastasia",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
         "voice_name": "en-SG-WayneNeural",
         "speed": "-10%",
     },
     "SG-woman": {
         "label": "新加坡英语-女声 (Microsoft)",
         "type": "ms-tts",
-        "speech_key": os.environ.get("AZURE_API_KEY"),
-        "service_region": "southeastasia",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
         "voice_name": "en-SG-LunaNeural",
-        "speed": "-10%",
+        "speed": "-15%",
     },
     "UK-man": {
         "label": "英式英语/中文-男声 (Microsoft)",
         "type": "ms-tts",
-        "speech_key": os.environ.get("AZURE_API_KEY"),
-        "service_region": "southeastasia",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
         "voice_name": "en-GB-OllieMultilingualNeural",
         "speed": "-10%",
     },
     "UK-woman": {
         "label": "英式英语/中文-女声 (Microsoft)",
         "type": "ms-tts",
-        "speech_key": os.environ.get("AZURE_API_KEY"),
-        "service_region": "southeastasia",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
         "voice_name": "en-GB-LibbyNeural",
+        "speed": "-10%",
+    },
+    "US-Azure-man": {
+        "label": "美式英语-男声 (Microsoft)",
+        "type": "ms-tts",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
+        "voice_name": "en-US-GuyNeural",
+        "speed": "-10%",
+    },
+    "US-Azure-woman": {
+        "label": "美式英语-女声 (Microsoft)",
+        "type": "ms-tts",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
+        "voice_name": "en-US-JennyNeural",
         "speed": "-10%",
     },
     "CH-man": {
         "label": "中文-男声 (Microsoft)",
         "type": "ms-tts",
-        "speech_key": os.environ.get("AZURE_API_KEY"),
-        "service_region": "southeastasia",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
         "voice_name": "zh-CN-YunyangNeural",
         "speed": "-20%",
+    },
+    "CH-woman": {
+        "label": "中文-女声 (Microsoft)",
+        "type": "ms-tts",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
+        "voice_name": "zh-CN-XiaoxiaoNeural",
+        "speed": "-20%",
+    },
+    "French-Azure-man": {
+        "label": "法语-男声 (Microsoft)",
+        "type": "ms-tts",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
+        "voice_name": "fr-FR-HenriNeural",
+        "speed": "-10%",
+    },
+    "French-Azure-woman": {
+        "label": "法语-女声 (Microsoft)",
+        "type": "ms-tts",
+        "speech_key": AZURE_SPEECH_KEY,
+        "service_region": AZURE_SPEECH_REGION,
+        "voice_name": "fr-FR-DeniseNeural",
+        "speed": "-10%",
     },
     "UK-Google": {
         "label": "英式英语 (Google)",
@@ -97,11 +158,168 @@ tts_models = {
         "lang": "zh",
         "tld": "com",
     },
+    "English-Chirp": {
+        "label": "英语 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "en-GB",
+        "voice_name": "en-GB-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+    "UK-Chirp-man": {
+        "label": "英式英语-男声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "en-GB",
+        "voice_name": "en-GB-Chirp3-HD-Charon",
+        "speed": "-10%",
+    },
+    "UK-Chirp-woman": {
+        "label": "英式英语-女声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "en-GB",
+        "voice_name": "en-GB-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+    "US-Chirp-man": {
+        "label": "美式英语-男声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "en-US",
+        "voice_name": "en-US-Chirp3-HD-Charon",
+        "speed": "-10%",
+    },
+    "US-Chirp-woman": {
+        "label": "美式英语-女声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "en-US",
+        "voice_name": "en-US-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+    "Chinese-Chirp": {
+        "label": "中文 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "cmn-CN",
+        "voice_name": "cmn-CN-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+    "Chinese-Chirp-man": {
+        "label": "中文普通话-男声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "cmn-CN",
+        "voice_name": "cmn-CN-Chirp3-HD-Charon",
+        "speed": "-10%",
+    },
+    "Chinese-Chirp-woman": {
+        "label": "中文普通话-女声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "cmn-CN",
+        "voice_name": "cmn-CN-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+    "French-Chirp": {
+        "label": "法语 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "fr-FR",
+        "voice_name": "fr-FR-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+    "French-Chirp-man": {
+        "label": "法语-男声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "fr-FR",
+        "voice_name": "fr-FR-Chirp3-HD-Charon",
+        "speed": "-10%",
+    },
+    "French-Chirp-woman": {
+        "label": "法语-女声 (Google Cloud Chirp 3 HD)",
+        "type": "google-cloud-tts",
+        "language_code": "fr-FR",
+        "voice_name": "fr-FR-Chirp3-HD-Leda",
+        "speed": "-10%",
+    },
+}
+
+tts_engines = [
+    {"id": "azure", "label": "Azure"},
+    {"id": "google", "label": "Google"},
+    {"id": "gtts", "label": "gTTS"},
+]
+
+tts_languages = [
+    {"id": "uk-en", "label": "英式英语"},
+    {"id": "us-en", "label": "美式英语"},
+    {"id": "sg-en", "label": "新加坡英语"},
+    {"id": "cmn-cn", "label": "中文"},
+    {"id": "fr-fr", "label": "法语"},
+]
+
+voice_genders = [
+    {"id": "male", "label": "男声"},
+    {"id": "female", "label": "女声"},
+]
+
+tts_voice_matrix = {
+    "azure": {
+        "uk-en": {
+            "male": "UK-man",
+            "female": "UK-woman",
+        },
+        "us-en": {
+            "male": "US-Azure-man",
+            "female": "US-Azure-woman",
+        },
+        "sg-en": {
+            "male": "SG-man",
+            "female": "SG-woman",
+        },
+        "cmn-cn": {
+            "male": "CH-man",
+            "female": "CH-woman",
+        },
+        "fr-fr": {
+            "male": "French-Azure-man",
+            "female": "French-Azure-woman",
+        },
+    },
+    "google": {
+        "uk-en": {
+            "male": "UK-Chirp-man",
+            "female": "UK-Chirp-woman",
+        },
+        "us-en": {
+            "male": "US-Chirp-man",
+            "female": "US-Chirp-woman",
+        },
+        "cmn-cn": {
+            "male": "Chinese-Chirp-man",
+            "female": "Chinese-Chirp-woman",
+        },
+        "fr-fr": {
+            "male": "French-Chirp-man",
+            "female": "French-Chirp-woman",
+        },
+    },
+    "gtts": {
+        "uk-en": {
+            "male": "UK-Google",
+            "female": "UK-Google",
+        },
+        "us-en": {
+            "male": "US-Google",
+            "female": "US-Google",
+        },
+        "cmn-cn": {
+            "male": "Chinese-Google",
+            "female": "Chinese-Google",
+        },
+        "fr-fr": {
+            "male": "French-Google",
+            "female": "French-Google",
+        },
+    },
 }
 
 def tts_supports_speed(tts_model):
     """判断TTS模型是否支持自定义语速"""
-    return tts_model.get("type") == "ms-tts"
+    return tts_model.get("type") in ("ms-tts", "google-cloud-tts")
 
 def parse_speed_percent(speed_value, default=0):
     """将语速配置解析为百分比整数"""
@@ -123,6 +341,11 @@ def format_speed_percent(speed_percent):
     speed_percent = parse_speed_percent(speed_percent)
     return f"{speed_percent:+d}%"
 
+def format_google_cloud_speaking_rate(speed_percent):
+    """转成Google Cloud TTS speakingRate倍率"""
+    speed_percent = parse_speed_percent(speed_percent)
+    return 1 + speed_percent / 100
+
 def get_tts_options():
     """返回前端需要的TTS选项元数据"""
     return [
@@ -135,10 +358,54 @@ def get_tts_options():
         for key, value in tts_models.items()
     ]
 
+def get_tts_engines():
+    """返回前端可选TTS引擎"""
+    return tts_engines
+
+def get_tts_languages():
+    """返回前端可选语言/口音"""
+    return tts_languages
+
+def get_voice_genders():
+    """返回前端可选声音性别"""
+    return voice_genders
+
+def get_tts_voice_matrix():
+    """返回前端的引擎、语言和声音组合配置"""
+    return tts_voice_matrix
+
+def resolve_tts_key(data):
+    """兼容旧的单一下拉，同时支持引擎+语言/口音+性别组合"""
+    tts_key = data.get('tts_select') or data.get('tts-select')
+    if tts_key in tts_models:
+        return tts_key
+
+    engine_key = data.get('tts_engine') or data.get('tts-engine')
+    language_key = data.get('tts_language') or data.get('tts-language')
+    voice_gender = data.get('voice_gender') or data.get('voice-gender') or 'female'
+
+    if not engine_key or not language_key:
+        old_profile_key = data.get('tts_profile') or data.get('tts-profile') or 'sg-en'
+        old_defaults = {
+            'sg-en': ('azure', 'sg-en'),
+            'uk-en': ('google', 'uk-en'),
+            'fr-fr': ('google', 'fr-fr'),
+            'cmn-cn': ('google', 'cmn-cn'),
+        }
+        engine_key, language_key = old_defaults.get(old_profile_key, ('azure', 'sg-en'))
+
+    engine_options = tts_voice_matrix.get(engine_key) or tts_voice_matrix["azure"]
+    language_options = engine_options.get(language_key) or next(iter(engine_options.values()))
+    return language_options.get(voice_gender) or language_options.get("female") or next(iter(language_options.values()))
+
 @app.route('/')
 def index():
     return render_template('index.html',
-        tts_options=get_tts_options()
+        tts_options=get_tts_options(),
+        tts_engines=get_tts_engines(),
+        tts_languages=get_tts_languages(),
+        voice_genders=get_voice_genders(),
+        tts_voice_matrix=get_tts_voice_matrix()
     )
 
 # OCR提示词
@@ -227,7 +494,7 @@ def extract_text_cloud(image_path):
     logger.info("使用Gemini OCR服务处理图片")
 
     try:
-        client = genai.Client()
+        client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else genai.Client()
 
         with open(image_path, 'rb') as f:
             image_bytes = f.read()
@@ -257,6 +524,10 @@ def create_empty_audio(filename):
         audio_file.write(b'')
     return audio_path
 
+def audio_file_has_content(audio_path):
+    """判断生成的音频文件是否可播放"""
+    return os.path.isfile(audio_path) and os.path.getsize(audio_path) > 0
+
 def validate_text(text):
     """验证文本是否有效"""
     if not text or not text.strip():
@@ -276,6 +547,9 @@ def generate_audio(text, filename, tts_model=None, speed_percent=None):
         elif tts_model["type"] == "ms-tts" and TTS_AZURE_AVAILABLE:
             logger.info(f"使用Azure TTS服务生成音频: {filename}")
             return generate_audio_azure(text, filename, tts_model, speed_percent)
+        elif tts_model["type"] == "google-cloud-tts" and TTS_GOOGLE_CLOUD_AVAILABLE:
+            logger.info(f"使用Google Cloud TTS服务生成音频: {filename}")
+            return generate_audio_google_cloud(text, filename, tts_model, speed_percent)
         else:
             logger.warning(f"警告: 所选TTS服务不可用或未启用，无法生成音频")
             return create_empty_audio(filename)
@@ -353,6 +627,65 @@ def generate_audio_azure(text, filename, tts_model=None, speed_percent=None):
         logger.error(f"Azure TTS生成失败: {str(e)}")
         return create_empty_audio(filename)
 
+def create_google_cloud_tts_client():
+    """创建Google Cloud TTS客户端，支持ADC或环境变量中的服务账号JSON"""
+    credentials_json = get_env_first(
+        "GOOGLE_CLOUD_TTS_CREDENTIALS_JSON",
+        "GOOGLE_CREDENTIALS_JSON",
+        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "GCP_SERVICE_ACCOUNT_JSON"
+    )
+    if credentials_json:
+        credentials_info = json.loads(credentials_json)
+        credentials = service_account.Credentials.from_service_account_info(credentials_info)
+        return texttospeech.TextToSpeechClient(credentials=credentials)
+
+    credentials_file = get_env_first(
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "GOOGLE_CLOUD_TTS_CREDENTIALS_FILE",
+        "GOOGLE_SERVICE_ACCOUNT_FILE",
+        "GCP_SERVICE_ACCOUNT_FILE"
+    )
+    if credentials_file:
+        credentials = service_account.Credentials.from_service_account_file(credentials_file)
+        return texttospeech.TextToSpeechClient(credentials=credentials)
+
+    return texttospeech.TextToSpeechClient()
+
+def generate_audio_google_cloud(text, filename, tts_model=None, speed_percent=None):
+    """使用Google Cloud Text-to-Speech生成音频"""
+    audio_path = os.path.join(AUDIO_FOLDER, filename)
+    if tts_model is None:
+        tts_model = tts_models["English-Chirp"]
+
+    try:
+        client = create_google_cloud_tts_client()
+        input_text = texttospeech.SynthesisInput(text=text)
+        voice = texttospeech.VoiceSelectionParams(
+            language_code=tts_model["language_code"],
+            name=tts_model["voice_name"],
+        )
+        speed = format_google_cloud_speaking_rate(
+            speed_percent if speed_percent is not None else tts_model.get("speed")
+        )
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.MP3,
+            speaking_rate=speed,
+        )
+
+        response = client.synthesize_speech(
+            input=input_text,
+            voice=voice,
+            audio_config=audio_config,
+        )
+        with open(audio_path, 'wb') as f:
+            f.write(response.audio_content)
+        logger.info(f"Google Cloud TTS生成成功: {filename}")
+        return audio_path
+    except Exception as e:
+        logger.error(f"Google Cloud TTS生成失败: {str(e)}")
+        return create_empty_audio(filename)
+
 
 
 def clean_audio_folder():
@@ -375,6 +708,26 @@ def update_processing_status(**kwargs):
     global processing_status
     processing_status.update(kwargs)
 
+def start_processing_stage(stage, message, request_id=None):
+    """开始新的处理阶段，避免前端读到上一轮任务状态"""
+    update_processing_status(
+        status='processing',
+        stage=stage,
+        request_id=request_id,
+        message=message,
+        current=0,
+        total=0,
+        progress=0
+    )
+
+def finish_processing_with_error(message):
+    """结束当前处理阶段，避免错误返回后前端继续轮询"""
+    update_processing_status(
+        status='done',
+        message=message,
+        progress=100
+    )
+
 def get_bold_word_texts(sentence):
     """兼容OCR原始结果和TTS生成后的重点词结构"""
     words = []
@@ -384,6 +737,15 @@ def get_bold_word_texts(sentence):
         if str(word).strip():
             words.append(str(word).strip())
     return words
+
+def sentence_has_audio(sentence):
+    """判断句子或重点词结果里是否有可播放音频"""
+    if sentence.get('audio_path'):
+        return True
+    return any(
+        isinstance(word, dict) and word.get('audio_path')
+        for word in sentence.get('bold_words') or []
+    )
 
 def process_bold_words(sentence, idx, tts_model, run_id, speed_percent=None):
     """处理句子中的加粗单词，生成音频和HTML"""
@@ -399,12 +761,16 @@ def process_bold_words(sentence, idx, tts_model, run_id, speed_percent=None):
             audio_filename = f'{run_id}_word_{idx}_{widx}.mp3'
 
             # 生成单词音频
-            generate_audio(
+            audio_path = generate_audio(
                 word,
                 audio_filename,
                 tts_model,
                 speed_percent
             )
+
+            if not audio_file_has_content(audio_path):
+                logger.warning(f"跳过空单词音频: {audio_filename}")
+                continue
             
             # 添加到结果列表
             word_audios.append({
@@ -449,13 +815,16 @@ def process_sentence(sentence, idx, tts_model, processed_count, total_sentences,
     
     # 生成整句音频 (不再有Word Wall的跳过逻辑)
     audio_filename = f'{run_id}_sentence_{idx}.mp3'
-    generate_audio(
+    audio_path = generate_audio(
         sentence['text'],
         audio_filename,
         tts_model,
         speed_percent
     )
-    sentence_data['audio_path'] = audio_filename
+    if audio_file_has_content(audio_path):
+        sentence_data['audio_path'] = audio_filename
+    else:
+        logger.warning(f"跳过空句子音频: {audio_filename}")
     
     # 处理加粗单词
     if get_bold_word_texts(sentence):
@@ -471,20 +840,16 @@ def process_sentence(sentence, idx, tts_model, processed_count, total_sentences,
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """处理上传的图片文件，只执行OCR"""
-    update_processing_status(
-        status='processing',
-        message='开始处理上传的图片',
-        current=0,
-        total=0,
-        progress=0
-    )
+    start_processing_stage('ocr', '正在上传图片', request.form.get('request_id'))
 
     try:
         if 'file' not in request.files:
+            finish_processing_with_error('没有文件上传')
             return jsonify({'error': '没有文件上传'}), 400
 
         file = request.files['file']
         if file.filename == '':
+            finish_processing_with_error('未选择文件')
             return jsonify({'error': '未选择文件'}), 400
 
         update_processing_status(message='保存上传的图片')
@@ -501,10 +866,12 @@ def upload_file():
             sentences = extract_text_cloud(image_path)
 
             if not sentences:
+                finish_processing_with_error('OCR识别失败，未能提取文本')
                 return jsonify({'error': 'OCR识别失败，未能提取文本'}), 500
 
         except Exception as e:
             logger.error(f"OCR处理错误: {e}")
+            finish_processing_with_error('OCR处理错误')
             return jsonify({'error': f'OCR处理错误: {str(e)}'}), 500
 
         total_sentences = len(sentences)
@@ -520,26 +887,21 @@ def upload_file():
         return jsonify(sentences)
     except Exception as e:
         logger.error(f"上传处理过程中发生错误: {e}")
+        finish_processing_with_error('图片处理失败')
         return jsonify({'error': f'处理失败: {str(e)}'}), 500
 
 @app.route('/generate-tts', methods=['POST'])
 def generate_tts():
     """根据OCR结果单独生成TTS音频"""
-    update_processing_status(
-        status='processing',
-        message='开始生成音频',
-        current=0,
-        total=0,
-        progress=0
-    )
-
     try:
         data = request.get_json(silent=True) or {}
+        start_processing_stage('tts', '开始生成音频', data.get('request_id'))
         sentences = data.get('sentences') or []
         if not isinstance(sentences, list) or not sentences:
+            finish_processing_with_error('没有可生成音频的OCR文本')
             return jsonify({'error': '没有可生成音频的OCR文本'}), 400
 
-        tts_key = data.get('tts_select') or data.get('tts-select') or 'UK-Google'
+        tts_key = resolve_tts_key(data)
         tts_model = tts_models.get(tts_key, tts_models['UK-Google'])
         speed_percent = None
         if tts_supports_speed(tts_model):
@@ -551,6 +913,7 @@ def generate_tts():
 
         items_to_speak = [sentence for sentence in sentences if sentence.get('text') and not sentence.get('is_title')]
         if not items_to_speak:
+            finish_processing_with_error('没有可生成音频的句子')
             return jsonify({'error': '没有可生成音频的句子'}), 400
 
         total_sentences = len(items_to_speak)
@@ -583,7 +946,19 @@ def generate_tts():
                 continue
 
         if not result:
+            finish_processing_with_error('音频生成失败，未能处理任何文本')
             return jsonify({'error': '音频生成失败，未能处理任何文本'}), 500
+
+        has_audio = any(sentence_has_audio(item) for item in result)
+        if not has_audio:
+            update_processing_status(
+                status='done',
+                message='音频生成失败',
+                current=processed_count,
+                total=total_sentences,
+                progress=100
+            )
+            return jsonify({'error': '音频生成失败，请检查TTS凭证或稍后重试'}), 500
 
         update_processing_status(
             status='done',
@@ -597,13 +972,14 @@ def generate_tts():
         return jsonify(result)
     except Exception as e:
         logger.error(f"TTS生成过程中发生错误: {e}")
+        finish_processing_with_error('TTS生成失败')
         return jsonify({'error': f'TTS生成失败: {str(e)}'}), 500
 
 @app.route('/audio/<filename>')
 def serve_audio(filename):
     filename = safe_filename(filename)
     audio_path = os.path.join(AUDIO_FOLDER, filename)
-    if not os.path.isfile(audio_path):
+    if not audio_file_has_content(audio_path):
         return jsonify({'error': '文件不存在'}), 404
     return send_file(audio_path, mimetype='audio/mpeg', as_attachment=False)
 
@@ -611,6 +987,8 @@ def serve_audio(filename):
 def init_processing_status():
     return {
         'status': 'idle',  # idle, processing, done
+        'stage': 'idle',
+        'request_id': None,
         'message': '准备就绪',
         'current': 0,
         'total': 0,

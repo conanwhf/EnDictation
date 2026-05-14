@@ -1,10 +1,12 @@
 # Azure App Service 配置文件
 name: endictation
 runtime: python
-runtimeVersion: 3.9
+runtimeVersion: 3.11
 startupCommand: bash startup.sh
 environmentVariables:
-  - name: QWEN_API_KEY
-    value: ""
   - name: GOOGLE_API_KEY
+    value: ""
+  - name: AZURE_API_KEY
+    value: ""
+  - name: GOOGLE_CLOUD_TTS_CREDENTIALS_JSON
     value: ""

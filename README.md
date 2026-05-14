@@ -6,8 +6,8 @@
 
 - 图片上传：支持拖放或选择文件上传听写列表图片
 - OCR 识别：自动识别图片中的文本内容和加粗/圈出的重点单词
-- TTS 生成：OCR 后手动生成音频，可重复按不同引擎和速度生成
-- 多语言支持：英语、中文、法语等多种语言和口音
+- TTS 生成：OCR 后手动选择引擎、语言、音色和速度，可重复生成音频
+- 多语言支持：新加坡英语、英式英语、中文普通话、法语
 - 音频播放：点击播放整句或重点单词的发音
 
 ## 技术实现
@@ -15,7 +15,7 @@
 - **前端**: HTML + CSS + JavaScript + Bootstrap 5
 - **后端**: Flask (Python 3.11)
 - **OCR**: Google Gemini 3 Flash Preview 多模态模型
-- **TTS**: Microsoft Azure Cognitive Services + Google TTS (gTTS)
+- **TTS**: Microsoft Azure Cognitive Services + Google TTS (gTTS) + Google Cloud Text-to-Speech
 
 ## 依赖
 
@@ -23,20 +23,22 @@
 pip install -r requirements.txt
 ```
 
-核心依赖：Flask、google-genai、gtts、azure-cognitiveservices-speech
+核心依赖：Flask、google-genai、gtts、azure-cognitiveservices-speech、google-cloud-texttospeech
 
 ## 使用方法
 
 1. 启动应用：`python app.py`
 2. 浏览器访问：`http://localhost:5001`
 3. 上传听写列表图片（建议分辨率不低于 1920x1080）
-4. OCR 完成后选择 TTS 引擎和速度，点击“生成TTS”
+4. OCR 完成后选择引擎、语言、速度和音色，点击“生成TTS”
 5. 生成完成后播放句子和单词音频
+
+默认 TTS 组合为 Azure + 新加坡英语 + 女声 + 0.85x。
 
 ### 使用限制
 
-- Gemini API 有调用频率限制，失败时请稍后重试
-- Microsoft TTS 如卡顿，可刷新页面切换到 Google TTS
+- 免费接口可能出现使用频率限制，图片处理失败请等待3分钟后重试
+- 不同 TTS 引擎可用的语言不同，页面会自动隐藏当前引擎不支持的语言
 - 音频生成单次请求限制 10 分钟以内内容
 
 ## 环境变量配置
@@ -44,7 +46,12 @@ pip install -r requirements.txt
 ```bash
 export GOOGLE_API_KEY="您的Gemini API密钥"    # 必需，用于OCR
 export AZURE_API_KEY="您的Azure API密钥"     # 使用Microsoft TTS时必需
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"  # 本地使用Google Cloud TTS时可用
 ```
+
+兼容别名：OCR 也可用 `GEMINI_API_KEY`；Azure TTS 也可用 `AZURE_SPEECH_KEY` 和 `AZURE_SPEECH_REGION`。
+
+Azure App Service 不适合引用本机 JSON 文件路径。部署到 Azure 时，用 `GOOGLE_CLOUD_TTS_CREDENTIALS_JSON` 直接传入压缩成一行的服务账号 JSON 字符串。
 
 ## Azure App Service 部署
 
@@ -55,6 +62,7 @@ export AZURE_API_KEY="您的Azure API密钥"     # 使用Microsoft TTS时必需
 在 Azure 门户的应用设置中配置：
 - `GOOGLE_API_KEY`: Gemini API 密钥
 - `AZURE_API_KEY`: Azure 语音服务密钥
+- `GOOGLE_CLOUD_TTS_CREDENTIALS_JSON`: Google Cloud TTS 服务账号 JSON 单行字符串
 
 ### 手动部署
 

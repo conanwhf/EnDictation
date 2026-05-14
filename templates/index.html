@@ -136,6 +136,24 @@
             background-color: #f8f9fa;
             border: 1px solid #dee2e6;
         }
+        #speed-range {
+            width: 100%;
+            height: 1.5rem;
+            accent-color: #0d6efd;
+        }
+        #speed-range::-webkit-slider-runnable-track {
+            height: 0.45rem;
+            background-color: #c9d6e8;
+            border-radius: 999px;
+        }
+        #speed-range::-webkit-slider-thumb {
+            margin-top: -0.35rem;
+        }
+        #speed-range::-moz-range-track {
+            height: 0.45rem;
+            background-color: #c9d6e8;
+            border-radius: 999px;
+        }
         #speed-help {
             min-height: 1.5rem;
         }
@@ -153,11 +171,7 @@
             <p>拖放图片到此处或点击选择文件</p>
             <div class="alert alert-info mb-3">
                 <i class="bi bi-exclamation-triangle me-2"></i>
-                免费接口可能出现使用频率限制，
-                <ul class="mb-0 mt-2">
-                    <li>图片处理失败请等待3分钟后重试</li>
-                    <li>Microsoft音频生成卡顿时，请刷新页面切换Google方式</li>
-                </ul>
+                免费接口可能出现使用频率限制，图片处理失败请等待3分钟后重试
             </div>
             <input type="file" id="file-input" class="d-none" accept="image/*">
             <button class="btn btn-primary" id="select-file-btn">选择图片</button>
@@ -176,20 +190,30 @@
 
         <div id="tts-controls">
             <div class="row g-3 align-items-end">
-                <div class="col-md-5">
-                    <label for="tts-select" class="form-label">TTS方式</label>
-                    <select class="form-select" id="tts-select">
-                        {% for option in tts_options %}
-                        <option value="{{ option.id }}" {% if option.id == 'UK-Google' %}selected{% endif %}>{{ option.label }}</option>
+                <div class="col-md-6">
+                    <label for="tts-engine-select" class="form-label">引擎</label>
+                    <select class="form-select" id="tts-engine-select">
+                        {% for engine in tts_engines %}
+                        <option value="{{ engine.id }}" {% if engine.id == 'azure' %}selected{% endif %}>{{ engine.label }}</option>
                         {% endfor %}
                     </select>
                 </div>
+                <div class="col-md-6">
+                    <label for="tts-language-select" class="form-label">语言</label>
+                    <select class="form-select" id="tts-language-select"></select>
+                </div>
+            </div>
+            <div class="row g-3 align-items-end mt-1">
                 <div class="col-md-5">
                     <label for="speed-range" class="form-label">速度：<span id="speed-value">1.00x</span></label>
-                    <input type="range" class="form-range" id="speed-range" min="-50" max="50" step="5" value="0">
+                    <input type="range" class="form-range" id="speed-range" min="-50" max="50" step="5" value="-15">
                     <div class="form-text" id="speed-help"></div>
                 </div>
-                <div class="col-md-2 d-grid">
+                <div class="col-md-3">
+                    <label for="voice-gender-select" class="form-label">音色</label>
+                    <select class="form-select" id="voice-gender-select"></select>
+                </div>
+                <div class="col-md-4 d-grid">
                     <button class="btn btn-primary" id="generate-tts-btn" disabled>
                         生成TTS
                     </button>
@@ -213,17 +237,41 @@
             const resultContainer = document.getElementById('result-container');
             const sentencesContainer = document.getElementById('sentences-container');
             const ttsControls = document.getElementById('tts-controls');
-            const ttsSelect = document.getElementById('tts-select');
+            const ttsEngineSelect = document.getElementById('tts-engine-select');
+            const ttsLanguageSelect = document.getElementById('tts-language-select');
+            const voiceGenderSelect = document.getElementById('voice-gender-select');
             const speedRange = document.getElementById('speed-range');
             const speedValue = document.getElementById('speed-value');
             const speedHelp = document.getElementById('speed-help');
             const generateTtsBtn = document.getElementById('generate-tts-btn');
             const ttsOptions = {{ tts_options|tojson }};
+            const ttsLanguages = {{ tts_languages|tojson }};
+            const voiceGenders = {{ voice_genders|tojson }};
+            const ttsVoiceMatrix = {{ tts_voice_matrix|tojson }};
             const ttsOptionMap = Object.fromEntries(ttsOptions.map(option => [option.id, option]));
+            const ttsLanguageMap = Object.fromEntries(ttsLanguages.map(language => [language.id, language]));
+            const voiceGenderMap = Object.fromEntries(voiceGenders.map(gender => [gender.id, gender]));
+            const defaultTtsSelection = {
+                engine: 'azure',
+                language: 'sg-en',
+                gender: 'female'
+            };
             let currentOcrData = [];
 
+            ttsEngineSelect.value = defaultTtsSelection.engine;
+            updateLanguageOptions(defaultTtsSelection.language);
+            updateGenderOptions(defaultTtsSelection.gender);
             updateSpeedControl();
-            ttsSelect.addEventListener('change', updateSpeedControl);
+            ttsEngineSelect.addEventListener('change', function() {
+                updateLanguageOptions();
+                updateGenderOptions();
+                updateSpeedControl();
+            });
+            ttsLanguageSelect.addEventListener('change', function() {
+                updateGenderOptions();
+                updateSpeedControl();
+            });
+            voiceGenderSelect.addEventListener('change', updateSpeedControl);
             speedRange.addEventListener('input', function() {
                 speedValue.textContent = formatSpeedLabel(speedRange.value);
             });
@@ -285,15 +333,64 @@
                 return `${speed.toFixed(2)}x`;
             }
 
+            function replaceSelectOptions(select, options, previousValue) {
+                select.innerHTML = '';
+                options.forEach(option => {
+                    const optionElement = document.createElement('option');
+                    optionElement.value = option.id;
+                    optionElement.textContent = option.label;
+                    select.appendChild(optionElement);
+                });
+
+                if (options.some(option => option.id === previousValue)) {
+                    select.value = previousValue;
+                } else if (options.length) {
+                    select.value = options[0].id;
+                }
+            }
+
+            function getEngineOptions() {
+                return ttsVoiceMatrix[ttsEngineSelect.value] || {};
+            }
+
+            function getLanguageOptions() {
+                const engineOptions = getEngineOptions();
+                return Object.keys(engineOptions)
+                    .map(languageId => ttsLanguageMap[languageId])
+                    .filter(Boolean);
+            }
+
+            function getGenderOptions() {
+                const engineOptions = getEngineOptions();
+                const languageOptions = engineOptions[ttsLanguageSelect.value] || {};
+                return Object.keys(languageOptions)
+                    .map(genderId => voiceGenderMap[genderId])
+                    .filter(Boolean);
+            }
+
+            function updateLanguageOptions(preferredValue) {
+                replaceSelectOptions(ttsLanguageSelect, getLanguageOptions(), preferredValue || ttsLanguageSelect.value);
+            }
+
+            function updateGenderOptions(preferredValue) {
+                replaceSelectOptions(voiceGenderSelect, getGenderOptions(), preferredValue || voiceGenderSelect.value);
+            }
+
+            function getSelectedTtsKey() {
+                const engineOptions = getEngineOptions();
+                const languageOptions = engineOptions[ttsLanguageSelect.value] || {};
+                return languageOptions[voiceGenderSelect.value] || languageOptions.female || Object.values(languageOptions)[0];
+            }
+
             function updateSpeedControl() {
-                const option = ttsOptionMap[ttsSelect.value];
+                const option = ttsOptionMap[getSelectedTtsKey()];
                 const supportsSpeed = option && option.supports_speed;
                 const defaultSpeed = option ? option.default_speed : 0;
 
                 speedRange.value = defaultSpeed;
                 speedRange.disabled = !supportsSpeed;
                 speedValue.textContent = supportsSpeed ? formatSpeedLabel(defaultSpeed) : '不可调';
-                speedHelp.textContent = supportsSpeed ? 'Microsoft TTS 支持按该速度生成。' : '当前引擎不支持速度调整。';
+                speedHelp.textContent = supportsSpeed ? '当前引擎支持按该速度生成。' : '当前引擎不支持速度调整。';
             }
 
             function escapeHtml(text) {
@@ -326,7 +423,9 @@
             
             function uploadFile(file) {
                 const formData = new FormData();
+                const requestId = createRequestId();
                 formData.append('file', file);
+                formData.append('request_id', requestId);
 
                 // 显示加载中
                 currentOcrData = [];
@@ -336,6 +435,7 @@
                 resultContainer.style.display = 'none';
                 const statusMessage = document.getElementById('status-message');
                 statusMessage.textContent = '正在上传图片，请稍候...';
+                beginStatusPolling('ocr', requestId);
                 
                 fetch('/upload', {
                     method: 'POST',
@@ -353,6 +453,7 @@
                 .then(data => {
                     // 隐藏加载中
                     loading.style.display = 'none';
+                    stopStatusPolling();
                     currentOcrData = data;
                     
                     // 显示结果
@@ -364,6 +465,7 @@
                 .catch(error => {
                     console.error('Error:', error);
                     loading.style.display = 'none';
+                    stopStatusPolling();
                     alert('处理图片时出错: ' + error.message);
                 });
                 
@@ -378,8 +480,12 @@
                 }
 
                 const payload = {
+                    request_id: createRequestId(),
                     sentences: currentOcrData,
-                    tts_select: ttsSelect.value,
+                    tts_select: getSelectedTtsKey(),
+                    tts_engine: ttsEngineSelect.value,
+                    tts_language: ttsLanguageSelect.value,
+                    voice_gender: voiceGenderSelect.value,
                     speed: Number(speedRange.value)
                 };
 
@@ -389,6 +495,7 @@
                 generateTtsBtn.textContent = '生成中...';
                 const statusMessage = document.getElementById('status-message');
                 statusMessage.textContent = '正在生成TTS音频，请稍候...';
+                beginStatusPolling('tts', payload.request_id);
 
                 fetch('/generate-tts', {
                     method: 'POST',
@@ -407,12 +514,14 @@
                 })
                 .then(data => {
                     loading.style.display = 'none';
+                    stopStatusPolling();
                     displayResults(data);
                     resultContainer.style.display = 'block';
                 })
                 .catch(error => {
                     console.error('TTS Error:', error);
                     loading.style.display = 'none';
+                    stopStatusPolling();
                     alert('生成TTS时出错: ' + error.message);
                 })
                 .finally(() => {
@@ -426,9 +535,36 @@
             // 检查处理状态
             let isProcessing = false;
             let lastUpdateTime = 0;
+            let activeStatusStage = null;
+            let activeStatusRequestId = null;
+            let statusPollingActive = false;
             const UPDATE_THRESHOLD = 500; // 更新阈值，单位毫秒
 
+            function createRequestId() {
+                if (window.crypto && window.crypto.randomUUID) {
+                    return window.crypto.randomUUID();
+                }
+                return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            }
+
+            function beginStatusPolling(stage, requestId) {
+                activeStatusStage = stage;
+                activeStatusRequestId = requestId;
+                statusPollingActive = true;
+                lastUpdateTime = 0;
+            }
+
+            function stopStatusPolling() {
+                statusPollingActive = false;
+                activeStatusStage = null;
+                activeStatusRequestId = null;
+            }
+
             function checkProcessStatus() {
+                if (!statusPollingActive) {
+                    return;
+                }
+
                 const statusMessage = document.getElementById('status-message');
                 const progressBar = document.querySelector('.progress');
                 const progressBarInner = document.querySelector('.progress-bar');
@@ -446,6 +582,18 @@
                 fetch('/status')
                     .then(response => response.json())
                     .then(data => {
+                        if (activeStatusRequestId && data.request_id !== activeStatusRequestId) {
+                            isProcessing = false;
+                            setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
+                            return;
+                        }
+
+                        if (activeStatusStage && data.stage && data.stage !== activeStatusStage) {
+                            isProcessing = false;
+                            setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
+                            return;
+                        }
+
                         if (data.status) {
                             // 只在页面准备就绪时更新状态信息
                             if (document.readyState === 'complete') {
@@ -461,7 +609,7 @@
                                     progressBarInner.setAttribute('aria-valuenow', progress);
                                     
                                     // 添加进度信息到状态消息
-                                    if (!data.message.includes('正在处理第')) {
+                                    if (data.stage === 'tts' && !data.message.includes('正在处理第')) {
                                         statusMessage.textContent = `${data.message} - 正在处理第 ${data.current}/${data.total} 个句子 (${progress}%)`;
                                     }
                                 }
@@ -471,6 +619,7 @@
                             if (data.status !== 'done') {
                                 setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
                             } else {
+                                statusPollingActive = false;
                                 // 处理完成后隐藏进度条
                                 setTimeout(() => {
                                     progressBar.style.display = 'none';
