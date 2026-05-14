@@ -1,10 +1,4 @@
 flask==3.1.0
-requests==2.31.0
 openai==1.63.2
-numpy==1.26.4
-soundfile==0.13.1
-dashscope==1.22.2
 gtts==2.5.4
-pytesseract==0.3.13
-Pillow==11.1.0
 azure-cognitiveservices-speech==1.43.0
