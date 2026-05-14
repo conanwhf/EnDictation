@@ -88,14 +88,6 @@ tts_models = {
     },
 }
 
-# 模型配置
-def get_selected_model(request, model_type):
-    if model_type == 'tts':
-        selected = request.form.get('tts-select', 'UK-Google')
-        if selected not in tts_models:
-            selected = 'UK-Google'
-        return tts_models[selected]
-
 @app.route('/')
 def index():
     return render_template('index.html',
@@ -421,7 +413,7 @@ def upload_file():
 
         total_sentences = len(sentences)
         processed_count = 0
-        tts_model = get_selected_model(request, 'tts')
+        tts_model = tts_models.get(request.form.get('tts-select', 'UK-Google'), tts_models['UK-Google'])
 
         update_processing_status(total=total_sentences, current=0, progress=0)
 
