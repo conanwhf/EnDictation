@@ -57,13 +57,11 @@ EnDictation/
 ### 图片上传处理 (`POST /upload`)
 
 ```
-1. 接收图片文件 + OCR/TTS 模型选择
+1. 接收图片文件 + TTS 模型选择
 2. safe_filename() 清理文件名，保存到 uploads/
 3. clean_audio_folder() 清理上一次生成的音频
 4. 调用 Gemini API 进行 OCR
-   ├─ encode_image_to_base64() 将图片编码为 base64
-   ├─ init_ocr_client() 创建 OpenAI 兼容客户端（临时清除代理）
-   └─ 发送 OCR_PROMPT + 图片到 Gemini
+   └─ 使用 google-genai SDK 发送 OCR_PROMPT + 图片字节到 Gemini
 5. parse_ocr_response() 解析返回的 markdown
    ├─ 移除代码块标记
    ├─ 按行分割，提取 **加粗单词**
@@ -100,7 +98,7 @@ EnDictation/
 
 | 名称 | 说明 |
 |------|------|
-| `ocr_ai_models` | OCR 服务配置字典，当前仅有 `gemini-ocr` |
+| `OCR_MODEL` | OCR 模型名称，当前为 `gemini-3-flash-preview` |
 | `tts_models` | TTS 服务配置字典，包含 Azure 和 Google 两种类型共 9 个选项 |
 | `OCR_PROMPT` | 发送给 Gemini 的 OCR 提示词 |
 | `UPLOAD_FOLDER` | 上传目录路径，默认 `uploads/` |
@@ -110,9 +108,7 @@ EnDictation/
 
 | 函数 | 说明 |
 |------|------|
-| `init_ocr_client(ocr_model)` | 创建 OpenAI 兼容客户端，临时清除 HTTP_PROXY 等代理环境变量 |
-| `encode_image_to_base64(image_path)` | 读取图片文件，返回 base64 字符串 |
-| `extract_text_cloud(image_path, ocr_model)` | 完整的 OCR 调用流程：编码 → 客户端 → API → 解析 |
+| `extract_text_cloud(image_path)` | 使用 google-genai SDK 调用 Gemini 进行 OCR：读取图片 → API 调用 → 解析结果 |
 | `parse_ocr_response(text)` | 解析 Gemini 返回的 markdown，提取句子列表和 bold_words |
 
 ### TTS 相关函数
@@ -141,7 +137,7 @@ EnDictation/
 
 单页面，无框架依赖，使用 Bootstrap 5 布局：
 
-- **上传区域**: 支持拖放和点击选择，含 OCR/TTS 模型下拉选择器
+- **上传区域**: 支持拖放和点击选择，含 TTS 模型下拉选择器
 - **加载指示器**: spinner + 进度条，通过轮询 `/status` 更新
 - **结果区域**: 动态渲染句子列表，每句含播放按钮和重点单词按钮
 
@@ -150,7 +146,7 @@ EnDictation/
 | 函数 | 说明 |
 |------|------|
 | `handleFiles(files)` | 验证文件类型，显示预览，触发上传 |
-| `uploadFile(file)` | 构建 FormData（含 OCR/TTS 选择），POST 到 `/upload`，启动状态轮询 |
+| `uploadFile(file)` | 构建 FormData（含 TTS 选择），POST 到 `/upload`，启动状态轮询 |
 | `checkProcessStatus()` | 每 500ms 轮询 `/status`，更新进度条和状态文字 |
 | `displayResults(data)` | 将 JSON 结果渲染为带播放按钮的句子列表 |
 | `playAudio(audioPath)` | 创建 `<audio>` 元素播放音频，播完自动移除 |
@@ -165,11 +161,10 @@ EnDictation/
 
 ### Google Gemini (OCR)
 
-- **模型**: `gemini-2.5-flash`
-- **接口**: `https://generativelanguage.googleapis.com/v1beta/openai/`
+- **模型**: `gemini-3-flash-preview`
+- **调用方式**: 使用 `google-genai` Python SDK
 - **认证**: API Key，通过环境变量 `GOOGLE_API_KEY` 配置
-- **调用方式**: 使用 OpenAI Python SDK 的兼容模式
-- **输入**: base64 编码的图片 + OCR 提示词
+- **输入**: 图片字节流 + OCR 提示词
 - **输出**: markdown 文本，重点单词用 `**...**` 标记
 
 ### Microsoft Azure TTS
@@ -237,5 +232,5 @@ python app.py
 
 - **单进程**: Flask 单进程运行，并发上传时全局 `processing_status` 会互相覆盖
 - **无持久化**: 音频和上传文件存在本地磁盘，重启后丢失
-- **内存 OCR**: 图片整体 base64 编码后发送，大图片可能导致内存压力
+- **内存 OCR**: 图片整体加载到内存后发送，大图片可能导致内存压力
 - **状态轮询**: 前端 500ms 轮询 `/status`，实时性有限

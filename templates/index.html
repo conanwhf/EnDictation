@@ -144,19 +144,13 @@
                 <i class="bi bi-exclamation-triangle me-2"></i>
                 免费接口可能出现使用频率限制，
                 <ul class="mb-0 mt-2">
-                    <li>图片处理失败请切换OCR方式或等待3分钟后重试</li>
+                    <li>图片处理失败请等待3分钟后重试</li>
                     <li>Microsoft音频生成卡顿时，请刷新页面切换Google方式</li>
                 </ul>
             </div>
             <input type="file" id="file-input" class="d-none" accept="image/*">
             <div class="row mb-3">
-    <div class="col-md-6">
-        <label for="ocr-select" class="form-label">OCR方式</label>
-        <select class="form-select" id="ocr-select">
-            <option value="gemini-ocr" selected>Gemini OCR</option>
-        </select>
-    </div>
-    <div class="col-md-6">
+    <div class="col-md-12">
         <label for="tts-select" class="form-label">TTS方式</label>
         <select class="form-select" id="tts-select">
             <option value="SG-man">新加坡英语-男声 (Microsoft)</option>
@@ -274,10 +268,8 @@
                 const formData = new FormData();
                 formData.append('file', file);
                 
-                // 添加OCR和TTS选择器的值到表单数据
-                const ocrSelect = document.getElementById('ocr-select');
+                // 添加TTS选择器的值到表单数据
                 const ttsSelect = document.getElementById('tts-select');
-                formData.append('ocr-select', ocrSelect.value);
                 formData.append('tts-select', ttsSelect.value);
                 
                 // 显示加载中

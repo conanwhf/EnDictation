@@ -13,7 +13,7 @@
 
 - **前端**: HTML + CSS + JavaScript + Bootstrap 5
 - **后端**: Flask (Python 3.11)
-- **OCR**: Google Gemini 2.5 Flash 多模态模型
+- **OCR**: Google Gemini 3 Flash Preview 多模态模型
 - **TTS**: Microsoft Azure Cognitive Services + Google TTS (gTTS)
 
 ## 依赖
@@ -22,7 +22,7 @@
 pip install -r requirements.txt
 ```
 
-核心依赖：Flask、openai（Gemini 兼容接口）、gtts、azure-cognitiveservices-speech
+核心依赖：Flask、google-genai、gtts、azure-cognitiveservices-speech
 
 ## 使用方法
 

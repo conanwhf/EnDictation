@@ -1,11 +1,10 @@
 from flask import Flask, render_template, request, jsonify, send_file
 import os
 import re
-import base64
 import argparse
 import logging
 import unicodedata
-from openai import OpenAI
+from google import genai
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -28,14 +27,7 @@ except ImportError:
 
 app = Flask(__name__)
 
-# AI服务配置字典
-ocr_ai_models = {
-    "gemini-ocr": {
-        "key": os.environ.get("GOOGLE_API_KEY"),
-        "url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "name": "gemini-2.5-flash",
-    },
-}
+OCR_MODEL = "gemini-3-flash-preview"
 
 # TTS服务配置字典
 tts_models = {
@@ -98,12 +90,7 @@ tts_models = {
 
 # 模型配置
 def get_selected_model(request, model_type):
-    if model_type == 'ocr':
-        selected = request.form.get('ocr-select', 'gemini-ocr')
-        if selected not in ocr_ai_models:
-            selected = 'gemini-ocr'
-        return ocr_ai_models[selected]
-    elif model_type == 'tts':
+    if model_type == 'tts':
         selected = request.form.get('tts-select', 'UK-Google')
         if selected not in tts_models:
             selected = 'UK-Google'
@@ -111,8 +98,7 @@ def get_selected_model(request, model_type):
 
 @app.route('/')
 def index():
-    return render_template('index.html', 
-        ocr_options=ocr_ai_models.keys(), 
+    return render_template('index.html',
         tts_options=tts_models.keys()
     )
 
@@ -134,44 +120,11 @@ def safe_filename(filename):
         filename = 'upload.jpg'
     return filename
 
-def encode_image_to_base64(image_path):
-    """将图片转换为base64编码"""
-    try:
-        with open(image_path, 'rb') as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    except Exception as e:
-        logger.error(f"图片编码失败: {str(e)}")
-        raise ValueError(f"无法读取或编码图片: {str(e)}")
-
 def sanitize_html(text):
     """清理OCR返回文本中的潜在危险HTML"""
     text = text.replace('<', '&lt;').replace('>', '&gt;')
     text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
     return text
-
-def init_ocr_client(ocr_model):
-    """初始化OCR客户端，处理代理设置"""
-    http_proxy = os.environ.pop('HTTP_PROXY', None)
-    https_proxy = os.environ.pop('HTTPS_PROXY', None)
-    no_proxy = os.environ.pop('NO_PROXY', None)
-
-    try:
-        client = OpenAI(
-            api_key=ocr_model["key"],
-            base_url=ocr_model["url"]
-        )
-        logger.info("成功初始化OCR客户端")
-        return client
-    except Exception as e:
-        logger.error(f"OCR客户端初始化错误: {e}")
-        raise
-    finally:
-        if http_proxy:
-            os.environ['HTTP_PROXY'] = http_proxy
-        if https_proxy:
-            os.environ['HTTPS_PROXY'] = https_proxy
-        if no_proxy:
-            os.environ['NO_PROXY'] = no_proxy
 
 def parse_ocr_response(text):
     """解析OCR返回的文本，提取句子和加粗单词"""
@@ -203,36 +156,30 @@ def parse_ocr_response(text):
     
     return sentences
 
-def extract_text_cloud(image_path, ocr_model):
-    """使用云API进行OCR识别"""
-    logger.info("使用云端OCR服务处理图片")
-    
+def extract_text_cloud(image_path):
+    """使用Gemini API进行OCR识别"""
+    logger.info("使用Gemini OCR服务处理图片")
+
     try:
-        # 编码图片
-        image_base64 = encode_image_to_base64(image_path)
-        
-        # 初始化客户端
-        client = init_ocr_client(ocr_model)
-        
-        # 调用OCR API
-        response = client.chat.completions.create(
-            model=ocr_model["name"],
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": OCR_PROMPT},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-                ]
-            }]
+        client = genai.Client()
+
+        with open(image_path, 'rb') as f:
+            image_bytes = f.read()
+
+        response = client.models.generate_content(
+            model=OCR_MODEL,
+            contents=[
+                {"inline_data": {"mime_type": "image/jpeg", "data": image_bytes}},
+                OCR_PROMPT,
+            ],
         )
-        
-        # 解析OCR结果
-        text = response.choices[0].message.content
+
+        text = response.text
         sentences = parse_ocr_response(text)
-        
+
         logger.info(f"OCR识别成功，提取了{len(sentences)}个句子")
         return sentences
-        
+
     except Exception as e:
         logger.error(f"OCR识别失败: {str(e)}")
         raise
@@ -460,8 +407,7 @@ def upload_file():
 
         try:
             update_processing_status(message='正在进行OCR识别')
-            ocr_model = get_selected_model(request, 'ocr')
-            sentences = extract_text_cloud(image_path, ocr_model)
+            sentences = extract_text_cloud(image_path)
 
             if not sentences:
                 return jsonify({'error': 'OCR识别失败，未能提取文本'}), 500
