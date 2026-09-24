@@ -55,6 +55,8 @@ Azure App Service 不适合引用本机 JSON 文件路径。部署到 Azure 时�
 
 ## Azure App Service 部署
 
+NAS 迁移尚未实施，项目改造计划见 [NAS 迁移计划](docs/NAS_MIGRATION.md)。本阶段不包含公网配置。
+
 本应用已适配 Azure App Service，push 到 `main` 分支通过 GitHub Actions 自动部署。
 
 ### Azure 应用设置
