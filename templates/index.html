@@ -10,37 +10,37 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f8f9fa;
             padding-top: 2rem;
-            font-size: 18px; /* 增大基础字体大小 */
+            font-size: 18px;
         }
         .container {
-            max-width: 900px; /* 增加容器宽度 */
+            max-width: 900px;
             background-color: white;
-            border-radius: 12px; /* 增大圆角 */
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.15); /* 增强阴影效果 */
-            padding: 2.5rem; /* 增加内边距 */
+            border-radius: 12px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+            padding: 2.5rem;
             margin-bottom: 2.5rem;
         }
         h1 {
             color: #0d6efd;
             margin-bottom: 1.8rem;
             text-align: center;
-            font-size: 2.5rem; /* 增大标题字体 */
+            font-size: 2.5rem;
             font-weight: 600;
         }
         h4 {
-            font-size: 1.5rem; /* 增大副标题字体 */
+            font-size: 1.5rem;
             color: #495057;
             margin-top: 1.5rem;
             margin-bottom: 1.5rem;
         }
         .upload-area {
-            border: 3px dashed #dee2e6; /* 增加边框宽度 */
+            border: 3px dashed #dee2e6;
             border-radius: 8px;
             padding: 2.5rem;
             text-align: center;
             margin-bottom: 2.5rem;
             transition: all 0.3s;
-            background-color: #f9fbfd; /* 轻微背景色 */
+            background-color: #f9fbfd;
         }
         .upload-area:hover {
             border-color: #0d6efd;
@@ -53,59 +53,59 @@
         .btn-primary {
             background-color: #0d6efd;
             border-color: #0d6efd;
-            font-size: 1.1rem; /* 增大按钮字体 */
-            padding: 0.6rem 1.5rem; /* 增大按钮内边距 */
-            border-radius: 6px; /* 增大按钮圆角 */
+            font-size: 1.1rem;
+            padding: 0.6rem 1.5rem;
+            border-radius: 6px;
         }
         .btn-primary:hover {
             background-color: #0b5ed7;
             border-color: #0a58ca;
-            transform: translateY(-2px); /* 悬停时轻微上移 */
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 悬停时添加阴影 */
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
             transition: all 0.3s ease;
         }
         .sentence-item {
-            margin-bottom: 1rem; /* 从1.8rem减小到1rem */
-            padding: 0.8rem 1.2rem; /* 从1.2rem 1.5rem减小到0.8rem 1.2rem */
+            margin-bottom: 1rem;
+            padding: 0.8rem 1.2rem;
             border-radius: 8px;
             background-color: #f8f9fa;
             border-left: 4px solid #dee2e6;
-            font-size: 1.1rem; /* 从1.2rem减小到1.1rem */
-            line-height: 1.4; /* 从1.6减小到1.4 */
+            font-size: 1.1rem;
+            line-height: 1.4;
             transition: all 0.2s ease;
         }
         .sentence-item:hover {
-            background-color: #f0f7ff; /* 悬停时背景色变化 */
-            border-left-color: #0d6efd; /* 悬停时边框色变化 */
+            background-color: #f0f7ff;
+            border-left-color: #0d6efd;
         }
-        /* 删除了.sentence-item.numbered类，所有句子使用统一样式 */
         .word-item {
             display: inline-block;
-            margin: 0.3rem; /* 从0.5rem减小到0.3rem */
-            padding: 0.4rem 0.8rem; /* 从0.6rem 1.2rem减小到0.4rem 0.8rem */
+            margin: 0.3rem;
+            padding: 0.4rem 0.8rem;
             border-radius: 20px;
             background-color: #e9ecef;
-            font-size: 1rem; /* 从1.1rem减小到1rem */
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
             transition: all 0.2s ease;
         }
         .word-item.bold {
-            font-weight: bold;
             background-color: #cfe2ff;
         }
         .word-item:hover {
-            background-color: #d0e0ff; /* 悬停时背景色变化 */
-            transform: translateY(-2px); /* 悬停时轻微上移 */
+            background-color: #d0e0ff;
+            transform: translateY(-2px);
         }
         .audio-btn {
             cursor: pointer;
             color: #0d6efd;
-            margin-right: 0.5rem; /* 从0.8rem减小到0.5rem */
-            font-size: 1.2rem; /* 从1.3rem减小到1.2rem */
+            margin-right: 0.5rem;
+            font-size: 1.2rem;
             transition: all 0.2s ease;
         }
         .audio-btn:hover {
-            color: #0a58ca; /* 悬停时颜色变化 */
-            transform: scale(1.1); /* 悬停时轻微放大 */
+            color: #0a58ca;
+            transform: scale(1.1);
         }
         .loading {
             display: none;
@@ -113,17 +113,17 @@
             margin: 2.5rem 0;
         }
         .spinner-border {
-            width: 3.5rem; /* 增大加载动画 */
+            width: 3.5rem;
             height: 3.5rem;
         }
         #preview-image {
-            max-width: 30%; /* 增大预览图片 */
+            max-width: 30%;
             margin: 1.5rem auto;
             border-radius: 8px;
             display: none;
             margin-left: auto;
             margin-right: auto;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* 添加图片阴影 */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
         #result-container {
             display: none;
@@ -158,9 +158,20 @@
             min-height: 1.5rem;
         }
         #status-message {
-            font-size: 1.2rem; /* 增大状态消息字体 */
+            font-size: 1.2rem;
             margin-top: 1rem;
             color: #495057;
+        }
+        #progress-block {
+            display: none;
+        }
+        .task-alerts {
+            display: none;
+            margin-top: 1rem;
+        }
+        #requery-btn {
+            display: none;
+            margin-top: 0.5rem;
         }
     </style>
 </head>
@@ -177,14 +188,27 @@
             <button class="btn btn-primary" id="select-file-btn">选择图片</button>
             <img id="preview-image" class="mt-3" alt="预览图片">
         </div>
-        
+
         <div class="loading" id="loading">
             <div class="spinner-border text-primary" role="status">
                 <span class="visually-hidden">加载中...</span>
             </div>
             <p class="mt-2" id="status-message">正在处理图片，请稍候...</p>
-            <div class="progress mt-3" style="display: none;">
-                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+            <div class="progress mt-3" id="progress-block">
+                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                     role="progressbar" style="width: 0%" aria-valuenow="0"
+                     aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+            <button class="btn btn-outline-primary btn-sm" id="requery-btn">重新查询当前任务</button>
+        </div>
+
+        <div class="task-alerts" id="error-block">
+            <div class="alert alert-danger mb-0" id="error-message"></div>
+        </div>
+        <div class="task-alerts" id="warnings-block">
+            <div class="alert alert-warning mb-0">
+                <div id="warnings-title">部分音频生成失败：</div>
+                <ul class="mb-0" id="warnings-list"></ul>
             </div>
         </div>
 
@@ -220,7 +244,7 @@
                 </div>
             </div>
         </div>
-        
+
         <div id="result-container">
             <div id="sentences-container"></div>
         </div>
@@ -234,6 +258,14 @@
             const selectFileBtn = document.getElementById('select-file-btn');
             const previewImage = document.getElementById('preview-image');
             const loading = document.getElementById('loading');
+            const statusMessage = document.getElementById('status-message');
+            const progressBlock = document.getElementById('progress-block');
+            const progressBar = progressBlock.querySelector('.progress-bar');
+            const requeryBtn = document.getElementById('requery-btn');
+            const errorBlock = document.getElementById('error-block');
+            const errorMessage = document.getElementById('error-message');
+            const warningsBlock = document.getElementById('warnings-block');
+            const warningsList = document.getElementById('warnings-list');
             const resultContainer = document.getElementById('result-container');
             const sentencesContainer = document.getElementById('sentences-container');
             const ttsControls = document.getElementById('tts-controls');
@@ -244,6 +276,7 @@
             const speedValue = document.getElementById('speed-value');
             const speedHelp = document.getElementById('speed-help');
             const generateTtsBtn = document.getElementById('generate-tts-btn');
+
             const ttsOptions = {{ tts_options|tojson }};
             const ttsLanguages = {{ tts_languages|tojson }};
             const voiceGenders = {{ voice_genders|tojson }};
@@ -251,13 +284,17 @@
             const ttsOptionMap = Object.fromEntries(ttsOptions.map(option => [option.id, option]));
             const ttsLanguageMap = Object.fromEntries(ttsLanguages.map(language => [language.id, language]));
             const voiceGenderMap = Object.fromEntries(voiceGenders.map(gender => [gender.id, gender]));
-            const defaultTtsSelection = {
-                engine: 'azure',
-                language: 'sg-en',
-                gender: 'female'
-            };
-            let currentOcrData = [];
+            const defaultTtsSelection = { engine: 'azure', language: 'sg-en', gender: 'female' };
 
+            // 初始设计值（NAS_MIGRATION §3.6）：轮询 1 秒；网络错误有限重试 1s/2s/4s
+            const POLL_INTERVAL_MS = 1000;
+            const NETWORK_RETRY_DELAYS_MS = [1000, 2000, 4000];
+
+            // 当前 OCR 原始数据：重复生成 TTS 不触发新 OCR
+            let currentOcrData = [];
+            let uploadingLocked = false;
+
+            // ---- TTS 选项控件（沿用既有矩阵逻辑） ----
             ttsEngineSelect.value = defaultTtsSelection.engine;
             updateLanguageOptions(defaultTtsSelection.language);
             updateGenderOptions(defaultTtsSelection.gender);
@@ -276,57 +313,6 @@
                 speedValue.textContent = formatSpeedLabel(speedRange.value);
             });
             generateTtsBtn.addEventListener('click', generateTts);
-            
-            // 点击选择文件按钮
-            selectFileBtn.addEventListener('click', function() {
-                console.log('选择图片按钮被点击');
-                fileInput.click();
-            });
-            
-            // 拖放功能
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, preventDefaults, false);
-            });
-            
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            ['dragenter', 'dragover'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, highlight, false);
-            });
-            
-            ['dragleave', 'drop'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, unhighlight, false);
-            });
-            
-            function highlight() {
-                uploadArea.classList.add('highlight');
-            }
-            
-            function unhighlight() {
-                uploadArea.classList.remove('highlight');
-            }
-            
-            // 处理拖放的文件
-            uploadArea.addEventListener('drop', handleDrop, false);
-            
-            function handleDrop(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
-                if (files.length) {
-                    fileInput.files = files;
-                    handleFiles(files);
-                }
-            }
-            
-            // 处理选择的文件
-            fileInput.addEventListener('change', function() {
-                if (fileInput.files.length) {
-                    handleFiles(fileInput.files);
-                }
-            });
 
             function formatSpeedLabel(value) {
                 const speed = 1 + Number(value) / 100;
@@ -341,7 +327,6 @@
                     optionElement.textContent = option.label;
                     select.appendChild(optionElement);
                 });
-
                 if (options.some(option => option.id === previousValue)) {
                     select.value = previousValue;
                 } else if (options.length) {
@@ -354,15 +339,13 @@
             }
 
             function getLanguageOptions() {
-                const engineOptions = getEngineOptions();
-                return Object.keys(engineOptions)
+                return Object.keys(getEngineOptions())
                     .map(languageId => ttsLanguageMap[languageId])
                     .filter(Boolean);
             }
 
             function getGenderOptions() {
-                const engineOptions = getEngineOptions();
-                const languageOptions = engineOptions[ttsLanguageSelect.value] || {};
+                const languageOptions = getEngineOptions()[ttsLanguageSelect.value] || {};
                 return Object.keys(languageOptions)
                     .map(genderId => voiceGenderMap[genderId])
                     .filter(Boolean);
@@ -376,268 +359,317 @@
                 replaceSelectOptions(voiceGenderSelect, getGenderOptions(), preferredValue || voiceGenderSelect.value);
             }
 
-            function getSelectedTtsKey() {
+            function updateSpeedControl() {
                 const engineOptions = getEngineOptions();
                 const languageOptions = engineOptions[ttsLanguageSelect.value] || {};
-                return languageOptions[voiceGenderSelect.value] || languageOptions.female || Object.values(languageOptions)[0];
-            }
-
-            function updateSpeedControl() {
-                const option = ttsOptionMap[getSelectedTtsKey()];
+                const ttsKey = languageOptions[voiceGenderSelect.value]
+                    || languageOptions.female || Object.values(languageOptions)[0];
+                const option = ttsOptionMap[ttsKey];
                 const supportsSpeed = option && option.supports_speed;
                 const defaultSpeed = option ? option.default_speed : 0;
-
                 speedRange.value = defaultSpeed;
                 speedRange.disabled = !supportsSpeed;
                 speedValue.textContent = supportsSpeed ? formatSpeedLabel(defaultSpeed) : '不可调';
-                speedHelp.textContent = supportsSpeed ? '当前引擎支持按该速度生成。' : '当前引擎不支持速度调整。';
+                speedHelp.textContent = supportsSpeed
+                    ? '当前引擎支持按该速度生成。' : '当前引擎不支持速度调整。';
             }
 
-            function escapeHtml(text) {
-                const span = document.createElement('span');
-                span.textContent = text || '';
-                return span.innerHTML;
+            // ---- 上传 ----
+            selectFileBtn.addEventListener('click', function() {
+                if (!uploadingLocked) {
+                    fileInput.click();
+                }
+            });
+
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
             }
 
-            function formatMarkdownText(text) {
-                return escapeHtml(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, highlight, false);
+            });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, unhighlight, false);
+            });
+
+            function highlight() {
+                uploadArea.classList.add('highlight');
             }
-            
+
+            function unhighlight() {
+                uploadArea.classList.remove('highlight');
+            }
+
+            uploadArea.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                if (dt.files.length && !uploadingLocked) {
+                    fileInput.files = dt.files;
+                    handleFiles(dt.files);
+                }
+            }, false);
+
+            fileInput.addEventListener('change', function() {
+                if (fileInput.files.length && !uploadingLocked) {
+                    handleFiles(fileInput.files);
+                }
+            });
+
             function handleFiles(files) {
                 const file = files[0];
-                if (file.type.startsWith('image/')) {
-                    // 显示预览
-                    previewImage.src = URL.createObjectURL(file);
-                    previewImage.style.display = 'block';
-                    
-                    // 隐藏选择图片按钮和提示文字
-                    selectFileBtn.style.display = 'none';
-                    document.querySelector('#upload-area p').style.display = 'none';
-                    
-                    // 上传文件
-                    uploadFile(file);
-                } else {
-                    alert('请选择图片文件');
+                if (!file.type.startsWith('image/')) {
+                    showError('请选择图片文件');
+                    return;
                 }
+                previewImage.src = URL.createObjectURL(file);
+                previewImage.style.display = 'block';
+                uploadFile(file);
             }
-            
+
             function uploadFile(file) {
                 const formData = new FormData();
-                const requestId = createRequestId();
                 formData.append('file', file);
-                formData.append('request_id', requestId);
 
-                // 显示加载中
                 currentOcrData = [];
                 ttsControls.style.display = 'none';
                 generateTtsBtn.disabled = true;
+                uploadingLocked = true;
+                selectFileBtn.disabled = true;
+                hideAlerts();
                 loading.style.display = 'block';
                 resultContainer.style.display = 'none';
-                const statusMessage = document.getElementById('status-message');
+                progressBlock.style.display = 'none';
+                requeryBtn.style.display = 'none';
                 statusMessage.textContent = '正在上传图片，请稍候...';
-                beginStatusPolling('ocr', requestId);
-                
-                fetch('/upload', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(data => {
-                            throw new Error(data.error || '网络响应不正常');
-                        });
-                    }
-                    statusMessage.textContent = 'OCR识别中，请稍候...';
-                    return response.json();
-                })
-                .then(data => {
-                    // 隐藏加载中
-                    loading.style.display = 'none';
-                    stopStatusPolling();
-                    currentOcrData = data;
-                    
-                    // 显示结果
-                    displayResults(data);
-                    ttsControls.style.display = 'block';
-                    generateTtsBtn.disabled = false;
-                    resultContainer.style.display = 'block';
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    loading.style.display = 'none';
-                    stopStatusPolling();
-                    alert('处理图片时出错: ' + error.message);
-                });
-                
-                // 添加状态更新检查
-                checkProcessStatus();
+
+                fetch('/upload', { method: 'POST', body: formData })
+                    .then(response => readTaskSubmission(response))
+                    .then(data => {
+                        statusMessage.textContent = 'OCR识别中，请稍候...';
+                        startPolling(data.task_id, 'ocr');
+                    })
+                    .catch(error => {
+                        loading.style.display = 'none';
+                        uploadingLocked = false;
+                        selectFileBtn.disabled = false;
+                        showError(`处理图片时出错: ${error.message}`);
+                    });
             }
 
+            // ---- 生成 TTS ----
             function generateTts() {
                 if (!currentOcrData.length) {
-                    alert('请先上传图片并完成OCR识别');
+                    showError('请先上传图片并完成OCR识别');
                     return;
                 }
-
                 const payload = {
-                    request_id: createRequestId(),
                     sentences: currentOcrData,
-                    tts_select: getSelectedTtsKey(),
                     tts_engine: ttsEngineSelect.value,
                     tts_language: ttsLanguageSelect.value,
                     voice_gender: voiceGenderSelect.value,
                     speed: Number(speedRange.value)
                 };
 
+                hideAlerts();
                 loading.style.display = 'block';
                 resultContainer.style.display = 'block';
                 generateTtsBtn.disabled = true;
                 generateTtsBtn.textContent = '生成中...';
-                const statusMessage = document.getElementById('status-message');
-                statusMessage.textContent = '正在生成TTS音频，请稍候...';
-                beginStatusPolling('tts', payload.request_id);
+                progressBlock.style.display = 'none';
+                requeryBtn.style.display = 'none';
+                statusMessage.textContent = '正在提交生成请求...';
 
                 fetch('/generate-tts', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 })
-                .then(response => {
-                    if (!response.ok) {
-                        return response.json().then(data => {
-                            throw new Error(data.error || 'TTS生成失败');
-                        });
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    loading.style.display = 'none';
-                    stopStatusPolling();
-                    displayResults(data);
-                    resultContainer.style.display = 'block';
-                })
-                .catch(error => {
-                    console.error('TTS Error:', error);
-                    loading.style.display = 'none';
-                    stopStatusPolling();
-                    alert('生成TTS时出错: ' + error.message);
-                })
-                .finally(() => {
-                    generateTtsBtn.disabled = false;
-                    generateTtsBtn.textContent = '生成TTS';
-                });
-
-                checkProcessStatus();
-            }
-            
-            // 检查处理状态
-            let isProcessing = false;
-            let lastUpdateTime = 0;
-            let activeStatusStage = null;
-            let activeStatusRequestId = null;
-            let statusPollingActive = false;
-            const UPDATE_THRESHOLD = 500; // 更新阈值，单位毫秒
-
-            function createRequestId() {
-                if (window.crypto && window.crypto.randomUUID) {
-                    return window.crypto.randomUUID();
-                }
-                return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-            }
-
-            function beginStatusPolling(stage, requestId) {
-                activeStatusStage = stage;
-                activeStatusRequestId = requestId;
-                statusPollingActive = true;
-                lastUpdateTime = 0;
-            }
-
-            function stopStatusPolling() {
-                statusPollingActive = false;
-                activeStatusStage = null;
-                activeStatusRequestId = null;
-            }
-
-            function checkProcessStatus() {
-                if (!statusPollingActive) {
-                    return;
-                }
-
-                const statusMessage = document.getElementById('status-message');
-                const progressBar = document.querySelector('.progress');
-                const progressBarInner = document.querySelector('.progress-bar');
-                const currentTime = Date.now();
-
-                // 如果正在处理中或者距离上次更新时间太短，则跳过本次更新
-                if (isProcessing || (currentTime - lastUpdateTime) < UPDATE_THRESHOLD) {
-                    setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
-                    return;
-                }
-
-                isProcessing = true;
-                lastUpdateTime = currentTime;
-                
-                fetch('/status')
-                    .then(response => response.json())
+                    .then(response => readTaskSubmission(response))
                     .then(data => {
-                        if (activeStatusRequestId && data.request_id !== activeStatusRequestId) {
-                            isProcessing = false;
-                            setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
-                            return;
-                        }
-
-                        if (activeStatusStage && data.stage && data.stage !== activeStatusStage) {
-                            isProcessing = false;
-                            setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
-                            return;
-                        }
-
-                        if (data.status) {
-                            // 只在页面准备就绪时更新状态信息
-                            if (document.readyState === 'complete') {
-                                statusMessage.textContent = data.message;
-                                
-                                // 检查是否有进度信息
-                                if (data.current > 0 && data.total > 0) {
-                                    const progress = data.progress || Math.round((data.current / data.total) * 100);
-                                    
-                                    // 显示进度条
-                                    progressBar.style.display = 'block';
-                                    progressBarInner.style.width = `${progress}%`;
-                                    progressBarInner.setAttribute('aria-valuenow', progress);
-                                    
-                                    // 添加进度信息到状态消息
-                                    if (data.stage === 'tts' && !data.message.includes('正在处理第')) {
-                                        statusMessage.textContent = `${data.message} - 正在处理第 ${data.current}/${data.total} 个句子 (${progress}%)`;
-                                    }
-                                }
-                            }
-                            
-                            // 如果处理未完成，继续检查
-                            if (data.status !== 'done') {
-                                setTimeout(checkProcessStatus, UPDATE_THRESHOLD);
-                            } else {
-                                statusPollingActive = false;
-                                // 处理完成后隐藏进度条
-                                setTimeout(() => {
-                                    progressBar.style.display = 'none';
-                                }, UPDATE_THRESHOLD);
-                            }
-                        }
-                        isProcessing = false;
+                        statusMessage.textContent = '正在生成TTS音频，请稍候...';
+                        startPolling(data.task_id, 'tts');
                     })
                     .catch(error => {
-                        console.error('状态检查错误:', error);
-                        isProcessing = false;
+                        loading.style.display = 'none';
+                        generateTtsBtn.disabled = false;
+                        generateTtsBtn.textContent = '生成TTS';
+                        // 保留 OCR 内容与选择，便于调整后重新提交
+                        showError(`生成TTS时出错: ${error.message}`);
                     });
             }
-            
+
+            function readTaskSubmission(response) {
+                return response.json().then(body => {
+                    if (response.status === 202) {
+                        return body;
+                    }
+                    const message = (body && body.error && body.error.message) || '请求失败';
+                    const code = body && body.error && body.error.code;
+                    if (response.status === 403) {
+                        throw new Error('会话已失效，请刷新页面后重试');
+                    }
+                    if (response.status === 429 && code === 'capacity') {
+                        throw new Error(`${message}（任务未被受理，当前内容与选择已保留）`);
+                    }
+                    throw new Error(message);
+                });
+            }
+
+            // ---- 轮询：单条可停止的定时链，不叠加并发定时器 ----
+            const poll = { active: false, timer: null, taskId: null, stage: null, retryCount: 0 };
+
+            function startPolling(taskId, stage) {
+                stopPolling();
+                poll.active = true;
+                poll.taskId = taskId;
+                poll.stage = stage;
+                poll.retryCount = 0;
+                requeryBtn.style.display = 'none';
+                schedulePoll(0);
+            }
+
+            function stopPolling() {
+                if (poll.timer !== null) {
+                    clearTimeout(poll.timer);
+                }
+                poll.timer = null;
+                poll.active = false;
+            }
+
+            function schedulePoll(delayMs) {
+                poll.timer = setTimeout(runPoll, delayMs);
+            }
+
+            function runPoll() {
+                if (!poll.active) {
+                    return;
+                }
+                const taskId = poll.taskId;
+                fetch(`/tasks/${encodeURIComponent(taskId)}`)
+                    .then(response => {
+                        if (response.status === 404) {
+                            // 统一提示：任务不存在或已过期（如服务重启）
+                            throw { taskExpired: true };
+                        }
+                        if (!response.ok) {
+                            throw new Error(`状态查询失败 (${response.status})`);
+                        }
+                        return response.json();
+                    })
+                    .then(task => {
+                        if (!poll.active || task.task_id !== poll.taskId) {
+                            return; // 切换任务后忽略旧响应
+                        }
+                        poll.retryCount = 0;
+                        handleTaskUpdate(task);
+                    })
+                    .catch(error => {
+                        if (!poll.active) {
+                            return;
+                        }
+                        if (error && error.taskExpired) {
+                            stopPolling();
+                            onTaskFinishedUI();
+                            showError('任务不存在或已过期，请重新提交');
+                            return;
+                        }
+                        // 临时网络错误有限重试：1s/2s/4s，仍失败则停止并提供重新查询入口
+                        if (poll.retryCount < NETWORK_RETRY_DELAYS_MS.length) {
+                            const delay = NETWORK_RETRY_DELAYS_MS[poll.retryCount];
+                            poll.retryCount += 1;
+                            statusMessage.textContent = `网络异常，${delay / 1000} 秒后自动重试...`;
+                            schedulePoll(delay);
+                        } else {
+                            stopPolling();
+                            statusMessage.textContent = '暂时无法查询任务状态。';
+                            requeryBtn.style.display = 'inline-block';
+                        }
+                    });
+            }
+
+            requeryBtn.addEventListener('click', function() {
+                if (poll.taskId) {
+                    requeryBtn.style.display = 'none';
+                    poll.retryCount = 0;
+                    poll.active = true;
+                    statusMessage.textContent = '正在重新查询任务...';
+                    schedulePoll(0);
+                }
+            });
+
+            function handleTaskUpdate(task) {
+                if (task.status === 'queued') {
+                    statusMessage.textContent = '排队中，等待前一项任务完成...';
+                    progressBlock.style.display = 'none';
+                    schedulePoll(POLL_INTERVAL_MS);
+                    return;
+                }
+                if (task.status === 'running') {
+                    if (task.stage === 'ocr' || task.total === 0) {
+                        // OCR 阶段不渲染进度条，仅显示识别中
+                        statusMessage.textContent = 'OCR识别中，请稍候...';
+                        progressBlock.style.display = 'none';
+                    } else {
+                        statusMessage.textContent =
+                            `${task.message}（${task.current}/${task.total}，${task.progress}%）`;
+                        progressBlock.style.display = 'block';
+                        progressBar.style.width = `${task.progress}%`;
+                        progressBar.setAttribute('aria-valuenow', String(task.progress));
+                    }
+                    schedulePoll(POLL_INTERVAL_MS);
+                    return;
+                }
+                stopPolling();
+                onTaskFinishedUI();
+                if (task.status === 'succeeded') {
+                    displayResults(task.result);
+                    if (task.warnings && task.warnings.length) {
+                        showWarnings(task.warnings);
+                    }
+                } else {
+                    const detail = (task.error && task.error.message) || '未知错误';
+                    showError(`任务失败：${detail}`);
+                }
+            }
+
+            function onTaskFinishedUI() {
+                loading.style.display = 'none';
+                progressBlock.style.display = 'none';
+                uploadingLocked = false;
+                selectFileBtn.disabled = false;
+                generateTtsBtn.disabled = false;
+                generateTtsBtn.textContent = '生成TTS';
+            }
+
+            // ---- 提示信息 ----
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorBlock.style.display = 'block';
+            }
+
+            function showWarnings(warnings) {
+                warningsList.innerHTML = '';
+                warnings.forEach(warning => {
+                    const item = document.createElement('li');
+                    item.textContent = warning;
+                    warningsList.appendChild(item);
+                });
+                warningsBlock.style.display = 'block';
+            }
+
+            function hideAlerts() {
+                errorBlock.style.display = 'none';
+                warningsBlock.style.display = 'none';
+            }
+
+            // ---- 结果渲染：全部用 DOM API 与 textContent，不注入服务端 HTML ----
             function displayResults(data) {
                 sentencesContainer.innerHTML = '';
-                
-                // 查找OCR返回的第一行作为标题
                 let title = 'OCR识别结果';
                 for (let i = 0; i < data.length; i++) {
                     if (data[i].is_title) {
@@ -645,179 +677,112 @@
                         break;
                     }
                 }
-                
-                // 添加标题
+
                 const sentencesTitle = document.createElement('h4');
                 sentencesTitle.className = 'mb-3 text-center';
                 sentencesTitle.textContent = title;
                 sentencesContainer.appendChild(sentencesTitle);
-                
-                // 显示句子
-                data.forEach((sentence, index) => {
-                    // 跳过已作为标题显示的第一行
-                    if (sentence.is_title) return;
-                    
-                    // 判断是否有音频路径，有则添加播放按钮
+
+                data.forEach(sentence => {
+                    if (sentence.is_title) {
+                        return;
+                    }
+                    const sentenceDiv = document.createElement('div');
+                    sentenceDiv.className = 'sentence-item';
+
+                    const sentenceText = document.createElement('p');
+                    sentenceText.className = 'mb-2';
+
                     if (sentence.audio_path) {
-                        const sentenceDiv = document.createElement('div');
-                        // 所有句子使用统一样式
-                        sentenceDiv.className = 'sentence-item';
-                        
-                        // 创建句子文本和播放按钮
-                        const sentenceText = document.createElement('p');
-                        sentenceText.className = 'mb-2';
-                        
-                        // 添加播放按钮
-                        const playIcon = document.createElement('span');
-                        playIcon.className = 'audio-btn';
-                        playIcon.innerHTML = '<i class="bi bi-play-circle-fill"></i>';
-                        playIcon.onclick = function() {
-                            playAudio(sentence.audio_path);
-                        };
-                        sentenceText.appendChild(playIcon);
-                        
-                        // 处理句子文本，使用html_text字段，它已经包含了单词按钮
-                        const textSpan = document.createElement('span');
-                        if (sentence.html_text) {
-                            // 使用html_text，它已经包含了单词按钮
-                            // 修复单词按钮中的playAudio函数引用
-                            let fixedHtml = sentence.html_text.replace(/onclick="playAudio\('(.*?)'\)"/g, function(match, audioPath) {
-                                return `onclick="window.playAudio('${audioPath}')"`;
-                            });
-                            textSpan.innerHTML = fixedHtml;
+                        sentenceText.appendChild(createPlayButton(sentence.audio_path));
+                    }
+
+                    const textSpan = document.createElement('span');
+                    renderSentenceText(textSpan,
+                        sentence.original_text || sentence.text,
+                        sentence.bold_words || []);
+                    sentenceText.appendChild(textSpan);
+
+                    sentenceDiv.appendChild(sentenceText);
+                    sentencesContainer.appendChild(sentenceDiv);
+                });
+
+                resultContainer.style.display = 'block';
+                ttsControls.style.display = 'block';
+                generateTtsBtn.disabled = false;
+            }
+
+            function renderSentenceText(container, originalText, boldWords) {
+                // 按 **加粗** 分段：普通文本用文本节点，加粗词用 <strong>；
+                // 仅含有效 audio_path 的重点词渲染为播放按钮，其余保留加粗文字
+                let wordIndex = 0;
+                const segments = originalText.split(/(\*\*[^*]+\*\*)/g);
+                segments.forEach(segment => {
+                    if (!segment) {
+                        return;
+                    }
+                    const match = segment.match(/^\*\*(.+)\*\*$/);
+                    if (match) {
+                        const word = match[1];
+                        const wordEntry = boldWords[wordIndex];
+                        wordIndex += 1;
+                        if (wordEntry && wordEntry.audio_path) {
+                            container.appendChild(createWordButton(word, wordEntry.audio_path));
                         } else {
-                            textSpan.textContent = sentence.text;
+                            const strong = document.createElement('strong');
+                            strong.textContent = word;
+                            container.appendChild(strong);
                         }
-                        sentenceText.appendChild(textSpan);
-                        
-                        sentenceDiv.appendChild(sentenceText);
-                        
-                        // 如果有加粗单词但没有在html_text中处理，则添加单词按钮区域
-                        if (sentence.has_bold_words && sentence.bold_words && sentence.bold_words.length > 0 && !(sentence.html_text || '').includes('word-item')) {
-                            const wordsContainer = document.createElement('div');
-                            wordsContainer.className = 'words-container mt-2';
-                            
-                            sentence.bold_words.forEach(wordObj => {
-                                const wordBtn = document.createElement('span');
-                                wordBtn.className = 'word-item bold';
-                                wordBtn.innerHTML = `<i class="bi bi-play-circle-fill"></i> ${escapeHtml(wordObj.word)}`;
-                                wordBtn.onclick = function() {
-                                    window.playAudio(wordObj.audio_path);
-                                };
-                                wordsContainer.appendChild(wordBtn);
-                            });
-                            
-                            sentenceDiv.appendChild(wordsContainer);
-                        }
-                        
-                        sentencesContainer.appendChild(sentenceDiv);
                     } else {
-                        // 没有音频的句子直接显示，保留markdown格式
-                        const textDiv = document.createElement('div');
-                        textDiv.className = 'sentence-item';
-                        
-                        // 使用original_text保留markdown格式
-                        if (sentence.original_text) {
-                            // 将markdown中的**转换为HTML的<strong>标签
-                            textDiv.innerHTML = formatMarkdownText(sentence.original_text);
-                        } else {
-                            textDiv.textContent = sentence.text;
-                        }
-                        
-                        sentencesContainer.appendChild(textDiv);
+                        container.appendChild(document.createTextNode(segment));
                     }
                 });
             }
-            
-            // 播放音频
-            window.playAudio = function(audioPath) {
-                console.log('播放音频:', audioPath);
-                console.log('原始音频文件名:', audioPath.split('/').pop());
-                console.log('当前页面路径:', window.location.pathname);
-                
-                // 确保路径以/audio开头
-                if (!audioPath.startsWith('/audio/')) {
-                    // 如果是直接传入的文件名（从单词按钮点击），确保添加正确的路径
-                    if (!audioPath.includes('/')) {
-                        audioPath = '/audio/' + audioPath;
-                    } else {
-                        audioPath = '/audio/' + audioPath.split('/').pop();
-                    }
-                }
-                
-                // 当使用Python的HTTP服务器时，需要调整路径
-                if (window.location.pathname.includes('/templates/')) {
-                    if (audioPath.startsWith('/audio/')) {
-                        audioPath = '../audio/' + audioPath.split('/').pop();
-                    } else if (audioPath.startsWith('audio/')) {
-                        audioPath = '../' + audioPath;
-                    } else {
-                        audioPath = '../audio/' + audioPath;
-                    }
-                }
-                
-                console.log('修正后的音频路径:', audioPath);
-                console.log('最终音频文件名:', audioPath.split('/').pop());
-                
-                // 创建一个新的Audio元素并添加到DOM中
+
+            function createPlayButton(audioPath) {
+                const button = document.createElement('span');
+                button.className = 'audio-btn';
+                const icon = document.createElement('i');
+                icon.className = 'bi bi-play-circle-fill';
+                button.appendChild(icon);
+                button.addEventListener('click', function() {
+                    playAudio(audioPath);
+                });
+                return button;
+            }
+
+            function createWordButton(word, audioPath) {
+                const button = document.createElement('span');
+                button.className = 'word-item bold';
+                const icon = document.createElement('i');
+                icon.className = 'bi bi-play-circle-fill audio-btn';
+                button.appendChild(icon);
+                button.appendChild(document.createTextNode(' ' + word));
+                button.addEventListener('click', function() {
+                    playAudio(audioPath);
+                });
+                return button;
+            }
+
+            // ---- 播放 ----
+            function playAudio(audioPath) {
                 const audioElement = document.createElement('audio');
                 audioElement.src = audioPath;
                 audioElement.style.display = 'none';
-                audioElement.controls = true; // 添加控件以便调试
-                audioElement.preload = 'auto'; // 预加载音频
+                audioElement.preload = 'auto';
                 document.body.appendChild(audioElement);
-                
-                // 添加错误处理
-                audioElement.onerror = function(e) {
-                    console.error('音频播放错误:', e);
-                    console.error('错误详情:', audioElement.error);
-                    alert('音频播放失败，请稍后再试');
+
+                audioElement.onerror = function() {
+                    showError('音频播放失败，文件可能已过期，请重新生成');
                     document.body.removeChild(audioElement);
                 };
-                
-                // 添加加载事件
-                audioElement.onloadeddata = function() {
-                    console.log('音频已加载，准备播放');
-                    console.log('音频时长:', audioElement.duration, '秒');
-                    console.log('音频格式:', audioElement.canPlayType('audio/mpeg') ? 'MP3' : '未知');
-                    // 确保音量设置正确
-                    audioElement.volume = 1.0;
-                };
-                
-                // 添加播放结束事件，移除元素
                 audioElement.onended = function() {
-                    console.log('音频播放完成');
                     document.body.removeChild(audioElement);
                 };
-                
-                // 添加播放开始事件
-                audioElement.onplay = function() {
-                    console.log('音频开始播放');
-                };
-                
-                // 尝试播放
-                const playPromise = audioElement.play();
-                if (playPromise !== undefined) {
-                    playPromise.then(() => {
-                        console.log('播放成功启动');
-                        console.log('当前播放时间:', audioElement.currentTime);
-                    }).catch(error => {
-                        console.error('播放错误详情:', {
-                            'name': error.name,
-                            'message': error.message,
-                            'code': error.code
-                        });
-                        console.error('播放失败:', error);
-                        // 尝试使用备用方法播放
-                        setTimeout(() => {
-                            console.log('尝试再次播放...');
-                            audioElement.play().catch(e => {
-                                console.error('再次播放失败:', e);
-                                document.body.removeChild(audioElement);
-                            });
-                        }, 500);
-                    });
-                }
+                audioElement.play().catch(function() {
+                    document.body.removeChild(audioElement);
+                    showError('音频播放失败，请重新生成');
+                });
             }
         });
     </script>
