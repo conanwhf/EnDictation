@@ -178,6 +178,15 @@ TTS 的预期提供方错误与单条调用超时使用同一处理规则：底�
 - 仅当 REST 不满足要求时考虑保留 SDK，实测 `stop_speaking_async()` 能否终止所模拟的挂起合成并让 `get()` 返回；不得把调用了停止方法等同于底层已经停止。
 - 两个候选均不能通过步骤 1 的验证时，停止迁移并报告，不增加看门狗或进程管理框架，也不在底层仍执行时提前宣告任务结束：迟到的调用仍可能写文件、更新状态，与已判定失败的任务冲突。缺少凭据或测试条件时记为未验证，不当作候选技术失败或自行绕过验证。
 
+#### 步骤 1 验证结论（2026-09-24，本机 macOS arm64，Python 3.11.15）
+
+- 选定实现：Azure 文本转语音 REST 接口 `POST https://{region}.tts.speech.microsoft.com/cognitiveservices/v1`，请求体沿用现有 SSML，请求头 `Ocp-Apim-Subscription-Key`、`Content-Type: application/ssml+xml`、`X-Microsoft-OutputFormat: audio-24khz-48kbitrate-mono-mp3`（格式名与官方 `SpeechSynthesisOutputFormat` 枚举 `Audio24Khz48KBitRateMonoMp3` 核对一致）。
+- 客户端与超时参数：`requests`（实测 2.34.2），`timeout=(5, 30)`（连接 5 秒、读取 30 秒），未配置自动重试（requests 默认 `max_retries=0`）。连接超时取 5 秒的原因：macOS 上 TCP SYN 重试约 7.8 秒即放弃，10 秒的套接字超时永远不会被触发（实测 10 秒配置下 `ConnectTimeout` 提前至 7.83 秒），5 秒可确定性由套接字超时生效。
+- 受控故障测试（`tools/verify_azure_rest.py`，假凭据仅发往 127.0.0.1 本地故障服务，6/6 通过）：连接拒绝 0.00s 明确 `ConnectionError`；塞满 backlog 的本地监听器触发 `ConnectTimeout` 实测 5.00s；本地挂起服务（接受连接、读完整请求、永不响应）触发 `ReadTimeout` 实测 30.00s，且服务端在等待窗口内观察到客户端 FIN，证明超时后连接释放；超时发生后同进程内下一次调用正常完成（串行恢复）；本地 401 应答触发 `requests.HTTPError` 明确传播，失败时不写音频文件。
+- 故障注入方式与排查记录：挂起服务必须按 `Content-Length` 读完整个请求再挂起——HTTP 请求头部与包体常分两个 TCP 段到达，把迟到包体当作客户端后续动作会使服务端提前关闭连接、客户端收到 `RemoteDisconnected`，该缺陷已在脚本中修复。
+- 未验证项：真实端点与密钥的合成、现有音色可合成性、默认/调整语速对比与 MP3 实际播放（当前环境缺少 `AZURE_API_KEY`，按计划记为未验证，不当作候选技术失败）。按用户指示采用 REST 路径继续实施，步骤 3 将从依赖中移除 Azure Speech SDK；凭据可用后执行 `python tools/verify_azure_rest.py --real` 补齐真实合成验证，若实测不通过再回到本节修订决策。
+- 已接受的限制：读取超时不能限制「服务器持续缓慢发送字节」的总时长，本验证不构成严格总时限证明。SDK 候选（`stop_speaking_async()`）无需验证。
+
 不能把 `future.result(timeout=...)` 当作底层调用已经停止；旧调用未结束时不得释放名额并启动下一次调用。调用超时与任务级 10 分钟预算是互补的两层，都不保证强制终止原生调用。连接/读取超时的剩余限制须随验证结果记录，不能因一次正常合成成功而宣称不存在挂起风险。
 
 仅在任务执行边界兜底捕获未预期异常，将任务明确标为失败并记录异常栈；提供方失败不再通过 `create_empty_audio()`、宽泛捕获后继续或静默默认值隐藏。已生成的有效音频可作为部分结果保留。
@@ -314,7 +323,8 @@ docker compose -f compose.nas.yml logs --tail=100
 ### 交付进度
 
 - 2026-09-24 步骤 0 完成（本地提交，未推送）：`.github/workflows/main_endictaion.yml` 移除 `deploy` job、Azure OIDC 登录、`id-token: write` 权限及部署用 zip/artifact 步骤，仅保留构建/语法检查。README 中「push 到 main 自动部署 Azure」的描述已同步删除。现有 Azure 网页保持已部署版本；首次推送将包含本工作流修改与全部迁移代码。
-- 其余步骤（1-6）未执行。步骤 1 的真实 Azure 合成与真实图片 OCR 用例因当前无凭据标记为未验证，按用户指示采用 REST 路径继续实施（结论待步骤 1 受控故障测试后写回 §3.5）。
+- 2026-09-24 步骤 1 完成（本地提交，未推送）：Azure 合成路径验证。受控故障测试 6/6 通过（详见 §3.5 步骤 1 验证结论），选定 REST 实现（requests、`timeout=(5, 30)`、`audio-24khz-48kbitrate-mono-mp3`）。真实 Azure 合成因无凭据记为未验证；真实图片 OCR 同样待 `GOOGLE_API_KEY`。验证脚本保留在 `tools/verify_azure_rest.py`（`--real` 补做真实合成）。
+- 其余步骤（2-6）未执行。
 
 项目改造交付时应报告：实际修改文件、自动化结果、本地容器结果、真实 API/浏览器结果、未验证项。若只完成本地验证，应写「可进入 NAS 部署验证」，不能写「NAS 已迁移完成」。
 
