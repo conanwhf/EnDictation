@@ -61,6 +61,7 @@ class TaskContext:
         self._task_id = record["task_id"]
         self.task_id = record["task_id"]
         self.task_dir = Path(record["task_dir"])
+        self.input_path = Path(record["input_path"]) if record["input_path"] else None
         self.owner = record["owner"]
         self.started_monotonic = time.monotonic()
 

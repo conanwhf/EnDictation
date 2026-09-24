@@ -1,13 +1,35 @@
-from flask import Flask, render_template, request, jsonify, send_file
-import html
-import os
-import re
+"""EnDictation 后端（NAS 迁移版）。
+
+主要变更见 docs/NAS_MIGRATION.md：
+- /upload 与 /generate-tts 受理后台任务并立即返回 202 与 status_url，不在 HTTP 请求内等待外部 API。
+- 会话隔离：签名 cookie 内保存服务端生成的随机会话 ID，任务按 owner 校验；
+  写接口要求有效会话并通过同源检查。
+- 输入上限（请求体大小、图片格式/像素、句子/重点词数量与长度、合成总量、执行预算）
+  在请求入口校验，均为写入代码常量的初始设计值，不提供环境变量配置。
+- Azure TTS 采用文本转语音 REST 接口（步骤 1 验证结论见 NAS_MIGRATION §3.5），
+  不再依赖 Azure Speech SDK；所有外部调用显式配置有限超时，不自动重试。
+"""
+
 import argparse
+import html
+import io
 import json
 import logging
-import unicodedata
+import math
+import os
+import re
 import uuid
+from datetime import timedelta
+from pathlib import Path
+
+import requests
+from flask import (Flask, abort, jsonify, render_template, request,
+                   send_from_directory, session)
+from PIL import Image
 from google import genai
+from google.genai import types as genai_types
+
+from tasks import CapacityError, TaskFailure, TaskManager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -15,17 +37,10 @@ logger = logging.getLogger(__name__)
 logging.getLogger('werkzeug').setLevel(logging.WARNING)
 
 try:
-    import azure.cognitiveservices.speech as speechsdk
-    TTS_AZURE_AVAILABLE = True
-except ImportError:
-    logger.warning("azure-cognitiveservices-speech库未安装，Azure TTS功能不可用")
-    TTS_AZURE_AVAILABLE = False
-
-try:
     from gtts import gTTS
     TTS_GTTS_AVAILABLE = True
 except ImportError:
-    logger.warning("gtts库未安装，Google TTS功能不可用")
+    logger.warning("gtts库未安装，gTTS引擎不可用")
     TTS_GTTS_AVAILABLE = False
 
 try:
@@ -33,12 +48,43 @@ try:
     from google.oauth2 import service_account
     TTS_GOOGLE_CLOUD_AVAILABLE = True
 except ImportError:
-    logger.warning("google-cloud-texttospeech库未安装，Google Cloud TTS功能不可用")
+    logger.warning("google-cloud-texttospeech库未安装，Google Cloud TTS引擎不可用")
     TTS_GOOGLE_CLOUD_AVAILABLE = False
 
-app = Flask(__name__)
+# ---- 初始设计值常量（NAS_MIGRATION §3.5/§3.6；不提供环境变量配置） ----
+
+DEFAULT_DATA_DIR = ".local-data"
+MAX_REQUEST_BYTES = 10 * 1024 * 1024          # 单次请求体上限，Flask MAX_CONTENT_LENGTH
+MAX_IMAGE_PIXELS = 20_000_000                 # 图片像素数上限
+IMAGE_FORMATS = {                              # Pillow 实际格式 → (扩展名, MIME)
+    "JPEG": (".jpg", "image/jpeg"),
+    "PNG": (".png", "image/png"),
+    "WEBP": (".webp", "image/webp"),
+}
+MAX_NON_TITLE_SENTENCES = 50                  # 单次 TTS 非标题句子数上限
+MAX_SENTENCE_CHARS = 500                      # 单句长度上限
+MAX_BOLD_WORDS_PER_SENTENCE = 20              # 每句重点词数量上限
+MAX_BOLD_WORD_CHARS = 100                     # 单个重点词长度上限
+MAX_TOTAL_SYNTH_CHARS = 10000                 # 单次合成文本总量上限（句+词，含重复部分）
+TASK_BUDGET_SECONDS = 600                     # 单任务执行预算（从实际开始执行起计，不含排队）
+SPEED_MIN, SPEED_MAX = -50, 50                # 语速百分比范围
+SESSION_LIFETIME_DAYS = 7                     # 会话 cookie 生存期
 
 OCR_MODEL = "gemini-3-flash-preview"
+OCR_TIMEOUT_SECONDS = 120.0                   # genai HTTP 超时（秒）
+OCR_PROMPT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
+
+# Azure REST（步骤 1 验证结论：requests、timeout=(5, 30)、不自动重试）
+AZURE_REST_CONNECT_TIMEOUT = 5.0
+AZURE_REST_READ_TIMEOUT = 30.0
+AZURE_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
+# gTTS 2.5.4 构造器默认无限等待，必须显式传入
+GTTS_TIMEOUT_SECONDS = 30.0
+# Google Cloud TTS 按调用传入超时，并显式关闭 GAPIC 默认重试
+GOOGLE_CLOUD_TTS_TIMEOUT_SECONDS = 30.0
+
+AUDIO_FILENAME_RE = re.compile(r"^(sentence|word)_[0-9]+(_[0-9]+)?\.mp3$")
+
 
 def get_env_first(*names, default=None):
     """按顺序读取第一个非空环境变量"""
@@ -47,6 +93,7 @@ def get_env_first(*names, default=None):
         if value:
             return value
     return default
+
 
 GEMINI_API_KEY = get_env_first("GOOGLE_API_KEY", "GEMINI_API_KEY")
 AZURE_SPEECH_KEY = get_env_first("AZURE_API_KEY", "AZURE_SPEECH_KEY", "SPEECH_KEY")
@@ -258,68 +305,31 @@ voice_genders = [
 
 tts_voice_matrix = {
     "azure": {
-        "uk-en": {
-            "male": "UK-man",
-            "female": "UK-woman",
-        },
-        "us-en": {
-            "male": "US-Azure-man",
-            "female": "US-Azure-woman",
-        },
-        "sg-en": {
-            "male": "SG-man",
-            "female": "SG-woman",
-        },
-        "cmn-cn": {
-            "male": "CH-man",
-            "female": "CH-woman",
-        },
-        "fr-fr": {
-            "male": "French-Azure-man",
-            "female": "French-Azure-woman",
-        },
+        "uk-en": {"male": "UK-man", "female": "UK-woman"},
+        "us-en": {"male": "US-Azure-man", "female": "US-Azure-woman"},
+        "sg-en": {"male": "SG-man", "female": "SG-woman"},
+        "cmn-cn": {"male": "CH-man", "female": "CH-woman"},
+        "fr-fr": {"male": "French-Azure-man", "female": "French-Azure-woman"},
     },
     "google": {
-        "uk-en": {
-            "male": "UK-Chirp-man",
-            "female": "UK-Chirp-woman",
-        },
-        "us-en": {
-            "male": "US-Chirp-man",
-            "female": "US-Chirp-woman",
-        },
-        "cmn-cn": {
-            "male": "Chinese-Chirp-man",
-            "female": "Chinese-Chirp-woman",
-        },
-        "fr-fr": {
-            "male": "French-Chirp-man",
-            "female": "French-Chirp-woman",
-        },
+        "uk-en": {"male": "UK-Chirp-man", "female": "UK-Chirp-woman"},
+        "us-en": {"male": "US-Chirp-man", "female": "US-Chirp-woman"},
+        "cmn-cn": {"male": "Chinese-Chirp-man", "female": "Chinese-Chirp-woman"},
+        "fr-fr": {"male": "French-Chirp-man", "female": "French-Chirp-woman"},
     },
     "gtts": {
-        "uk-en": {
-            "male": "UK-Google",
-            "female": "UK-Google",
-        },
-        "us-en": {
-            "male": "US-Google",
-            "female": "US-Google",
-        },
-        "cmn-cn": {
-            "male": "Chinese-Google",
-            "female": "Chinese-Google",
-        },
-        "fr-fr": {
-            "male": "French-Google",
-            "female": "French-Google",
-        },
+        "uk-en": {"male": "UK-Google", "female": "UK-Google"},
+        "us-en": {"male": "US-Google", "female": "US-Google"},
+        "cmn-cn": {"male": "Chinese-Google", "female": "Chinese-Google"},
+        "fr-fr": {"male": "French-Google", "female": "French-Google"},
     },
 }
+
 
 def tts_supports_speed(tts_model):
     """判断TTS模型是否支持自定义语速"""
     return tts_model.get("type") in ("ms-tts", "google-cloud-tts")
+
 
 def parse_speed_percent(speed_value, default=0):
     """将语速配置解析为百分比整数"""
@@ -336,15 +346,18 @@ def parse_speed_percent(speed_value, default=0):
 
     return max(-50, min(50, speed_percent))
 
+
 def format_speed_percent(speed_percent):
     """转成Azure SSML rate格式"""
     speed_percent = parse_speed_percent(speed_percent)
     return f"{speed_percent:+d}%"
 
+
 def format_google_cloud_speaking_rate(speed_percent):
     """转成Google Cloud TTS speakingRate倍率"""
     speed_percent = parse_speed_percent(speed_percent)
     return 1 + speed_percent / 100
+
 
 def get_tts_options():
     """返回前端需要的TTS选项元数据"""
@@ -358,79 +371,179 @@ def get_tts_options():
         for key, value in tts_models.items()
     ]
 
-def get_tts_engines():
-    """返回前端可选TTS引擎"""
-    return tts_engines
 
-def get_tts_languages():
-    """返回前端可选语言/口音"""
-    return tts_languages
+# ---- 请求校验 ----
 
-def get_voice_genders():
-    """返回前端可选声音性别"""
-    return voice_genders
+class RequestValidationError(Exception):
+    """请求入口校验失败；携带 HTTP 状态码与稳定错误类型。"""
 
-def get_tts_voice_matrix():
-    """返回前端的引擎、语言和声音组合配置"""
-    return tts_voice_matrix
+    def __init__(self, status, code, message):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
 
-def resolve_tts_key(data):
-    """兼容旧的单一下拉，同时支持引擎+语言/口音+性别组合"""
-    tts_key = data.get('tts_select') or data.get('tts-select')
-    if tts_key in tts_models:
-        return tts_key
 
-    engine_key = data.get('tts_engine') or data.get('tts-engine')
-    language_key = data.get('tts_language') or data.get('tts-language')
-    voice_gender = data.get('voice_gender') or data.get('voice-gender') or 'female'
+def validate_speed_value(value, tts_model):
+    """校验 speed：缺省取模型默认；非有限数值或越界返回 400；不支持速度的引擎忽略该值。"""
+    if value is None:
+        if tts_supports_speed(tts_model):
+            return parse_speed_percent(tts_model.get("speed"))
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RequestValidationError(400, "invalid_input", "speed 必须是数字")
+    if not math.isfinite(value):
+        raise RequestValidationError(400, "invalid_input", "speed 必须是有限数值")
+    if value < SPEED_MIN or value > SPEED_MAX:
+        raise RequestValidationError(400, "invalid_input",
+                                     f"speed 超出 {SPEED_MIN} 到 {SPEED_MAX} 的范围")
+    if not tts_supports_speed(tts_model):
+        return None
+    return int(value)
 
-    if not engine_key or not language_key:
-        old_profile_key = data.get('tts_profile') or data.get('tts-profile') or 'sg-en'
-        old_defaults = {
-            'sg-en': ('azure', 'sg-en'),
-            'uk-en': ('google', 'uk-en'),
-            'fr-fr': ('google', 'fr-fr'),
-            'cmn-cn': ('google', 'cmn-cn'),
-        }
-        engine_key, language_key = old_defaults.get(old_profile_key, ('azure', 'sg-en'))
 
-    engine_options = tts_voice_matrix.get(engine_key) or tts_voice_matrix["azure"]
-    language_options = engine_options.get(language_key) or next(iter(engine_options.values()))
-    return language_options.get(voice_gender) or language_options.get("female") or next(iter(language_options.values()))
+def _validate_sentence_row(row, position):
+    """校验单个句子行，返回规范化 dict。"""
+    if not isinstance(row, dict):
+        raise RequestValidationError(400, "invalid_input", f"第 {position} 项不是有效对象")
+    text = row.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise RequestValidationError(400, "invalid_input", f"第 {position} 句缺少有效文本")
+    if len(text) > MAX_SENTENCE_CHARS:
+        raise RequestValidationError(400, "invalid_input",
+                                     f"第 {position} 句超过 {MAX_SENTENCE_CHARS} 字符")
+    is_title = row.get("is_title", False)
+    if not isinstance(is_title, bool):
+        raise RequestValidationError(400, "invalid_input", f"第 {position} 项 is_title 必须是布尔值")
+    original_text = row.get("original_text")
+    if original_text is not None and not isinstance(original_text, str):
+        raise RequestValidationError(400, "invalid_input", f"第 {position} 项 original_text 必须是字符串")
+    title = row.get("title")
+    if title is not None and not isinstance(title, str):
+        raise RequestValidationError(400, "invalid_input", f"第 {position} 项 title 必须是字符串")
 
-@app.route('/')
-def index():
-    return render_template('index.html',
-        tts_options=get_tts_options(),
-        tts_engines=get_tts_engines(),
-        tts_languages=get_tts_languages(),
-        voice_genders=get_voice_genders(),
-        tts_voice_matrix=get_tts_voice_matrix()
-    )
+    bold_words = row.get("bold_words") or []
+    if not isinstance(bold_words, list):
+        raise RequestValidationError(400, "invalid_input", f"第 {position} 句 bold_words 必须是数组")
+    if len(bold_words) > MAX_BOLD_WORDS_PER_SENTENCE:
+        raise RequestValidationError(
+            400, "invalid_input", f"第 {position} 句重点词数量超过 {MAX_BOLD_WORDS_PER_SENTENCE}")
+    words = []
+    for word_item in bold_words:
+        if not isinstance(word_item, dict) or not isinstance(word_item.get("word"), str) \
+                or not word_item["word"].strip():
+            raise RequestValidationError(400, "invalid_input",
+                                         f"第 {position} 句存在无效的重点词条目")
+        if len(word_item["word"]) > MAX_BOLD_WORD_CHARS:
+            raise RequestValidationError(
+                400, "invalid_input", f"第 {position} 句重点词超过 {MAX_BOLD_WORD_CHARS} 字符")
+        words.append(word_item["word"])
 
-# OCR提示词
-OCR_PROMPT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
+    return {
+        "text": text,
+        "original_text": original_text if original_text is not None else text,
+        "is_title": is_title,
+        "title": title or "",
+        "bold_words": words,
+    }
 
-# 确保上传和音频文件夹存在
-UPLOAD_FOLDER = 'uploads'
-AUDIO_FOLDER = 'audio'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(AUDIO_FOLDER, exist_ok=True)
 
-def safe_filename(filename):
-    """清理文件名，防止路径遍历攻击"""
-    filename = os.path.basename(filename)
-    filename = unicodedata.normalize('NFKD', filename)
-    filename = re.sub(r'[^\w\s.-]', '', filename).strip()
-    if not filename:
-        filename = 'upload.jpg'
-    return filename
+def validate_tts_request(data):
+    """校验 /generate-tts 请求；返回 (规范化句子列表, tts_model, speed_percent)。"""
+    if not isinstance(data, dict):
+        raise RequestValidationError(400, "invalid_input", "请求体必须是 JSON 对象")
 
-def sanitize_html(text):
-    """清理OCR返回文本中的潜在危险HTML"""
-    text = text.replace('<', '&lt;').replace('>', '&gt;')
-    text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', text)
-    return text
+    sentences = data.get("sentences")
+    if not isinstance(sentences, list) or not sentences:
+        raise RequestValidationError(400, "invalid_input", "没有可生成音频的OCR文本")
+
+    clean_rows = []
+    non_title_count = 0
+    total_chars = 0
+    for position, row in enumerate(sentences, start=1):
+        clean = _validate_sentence_row(row, position)
+        if not clean["is_title"]:
+            non_title_count += 1
+            total_chars += len(clean["text"]) + sum(len(word) for word in clean["bold_words"])
+        clean_rows.append(clean)
+
+    if non_title_count == 0:
+        raise RequestValidationError(400, "invalid_input", "没有可生成音频的句子")
+    if non_title_count > MAX_NON_TITLE_SENTENCES:
+        raise RequestValidationError(
+            400, "invalid_input", f"非标题句子数超过 {MAX_NON_TITLE_SENTENCES} 条")
+    if total_chars > MAX_TOTAL_SYNTH_CHARS:
+        raise RequestValidationError(
+            400, "invalid_input", f"单次合成文本总量超过 {MAX_TOTAL_SYNTH_CHARS} 字符")
+
+    engine = data.get("tts_engine")
+    language = data.get("tts_language")
+    gender = data.get("voice_gender")
+    if not all(isinstance(field, str) and field for field in (engine, language, gender)):
+        raise RequestValidationError(400, "invalid_input", "必须提供 tts_engine、tts_language 与 voice_gender")
+    engine_options = tts_voice_matrix.get(engine)
+    language_options = (engine_options or {}).get(language)
+    tts_key = (language_options or {}).get(gender)
+    if tts_key is None:
+        raise RequestValidationError(400, "invalid_tts_combo",
+                                     "所选引擎、语言与音色组合不受支持，不回退到默认音色")
+    tts_model = tts_models[tts_key]
+
+    speed_percent = validate_speed_value(data.get("speed"), tts_model)
+    return clean_rows, tts_model, speed_percent
+
+
+def validate_and_save_image(file_storage, task_dir):
+    """校验上传图片的实际内容并写入任务目录，返回 (输入文件名, MIME 类型)。
+
+    上传文件名只作为显示信息，不参与目录定位；扩展名由 Pillow 实际格式决定。
+    """
+    raw = file_storage.read()
+    if not raw:
+        raise RequestValidationError(400, "invalid_input", "上传的文件为空")
+    try:
+        with Image.open(io.BytesIO(raw)) as img:
+            img.verify()
+        with Image.open(io.BytesIO(raw)) as img:
+            image_format = img.format
+            width, height = img.size
+    except Exception:
+        raise RequestValidationError(415, "invalid_input", "文件不是有效图片或已损坏")
+
+    if image_format not in IMAGE_FORMATS:
+        raise RequestValidationError(
+            415, "invalid_input", f"图片格式不支持，仅支持 JPEG、PNG、WebP（实际为 {image_format}）")
+    if width * height > MAX_IMAGE_PIXELS:
+        raise RequestValidationError(
+            413, "too_large", f"图片像素数超过上限 {MAX_IMAGE_PIXELS}（实际 {width}x{height}）")
+
+    extension, mime_type = IMAGE_FORMATS[image_format]
+    input_name = f"input{extension}"
+    (task_dir / input_name).write_bytes(raw)
+    return input_name, mime_type
+
+
+# ---- OCR ----
+
+_gemini_client = None
+
+
+def get_gemini_client():
+    """惰性创建 genai 客户端：显式 HTTP 超时、单次尝试不自动重试。"""
+    global _gemini_client
+    if _gemini_client is None:
+        client_options = {"timeout": OCR_TIMEOUT_SECONDS, "retry_options": {"attempts": 1}}
+        if GEMINI_API_KEY:
+            _gemini_client = genai.Client(
+                api_key=GEMINI_API_KEY,
+                http_options=genai_types.HttpOptions(**client_options),
+            )
+        else:
+            _gemini_client = genai.Client(
+                http_options=genai_types.HttpOptions(**client_options),
+            )
+    return _gemini_client
+
 
 def merge_standalone_number_labels(lines):
     """将独立一行的编号合并到下一行句子"""
@@ -459,551 +572,464 @@ def merge_standalone_number_labels(lines):
 
     return merged_lines
 
+
 def parse_ocr_response(text):
-    """解析OCR返回的文本，提取句子和加粗单词"""
-    # 移除markdown代码块标记
+    """解析 OCR 返回的文本，输出 §3.4 契约的结构化句子数组。
+
+    bold_words 统一为对象数组（每项含 word），标题行不带 bold_words；
+    首个非空行为标题，所有句子都携带该标题。
+    """
     text = re.sub(r'^```markdown\s*|\s*```$', '', text, flags=re.MULTILINE)
-    
-    # 分割文本行
     lines = merge_standalone_number_labels(text.split('\n'))
-    title = lines[0].strip() if lines and lines[0].strip() else ''
-    
-    # 解析文本，提取句子和加粗单词
+    first_nonempty = next((i for i, line in enumerate(lines) if line.strip()), None)
+    title = lines[first_nonempty].strip() if first_nonempty is not None else ''
+
     sentences = []
     for i, line in enumerate(lines):
         if not line.strip():
             continue
-            
-        # 提取加粗单词和清理句子
-        bold_words = re.findall(r'\*\*(.*?)\*\*', line)
-        clean_sentence = re.sub(r'\*\*', '', line)
-        
-        # 构建句子数据
+        clean_sentence = re.sub(r'\*', '', line)
+        if i == first_nonempty:
+            sentences.append({
+                'text': clean_sentence.strip(),
+                'original_text': line.strip(),
+                'is_title': True,
+                'title': title,
+            })
+            continue
+        bold_words = [{'word': word.strip()} for word in re.findall(r'\*\*(.*?)\*\*', line) if word.strip()]
         sentences.append({
             'text': clean_sentence.strip(),
-            'bold_words': bold_words,
             'original_text': line.strip(),
-            'is_title': i == 0,
-            'title': title if i == 0 else ''
+            'is_title': False,
+            'title': title,
+            'bold_words': bold_words,
         })
-    
     return sentences
 
-def extract_text_cloud(image_path):
-    """使用Gemini API进行OCR识别"""
+
+def extract_text_cloud(image_path, mime_type):
+    """使用 Gemini API 进行 OCR 识别"""
     logger.info("使用Gemini OCR服务处理图片")
+    client = get_gemini_client()
 
+    with open(image_path, 'rb') as f:
+        image_bytes = f.read()
+
+    response = client.models.generate_content(
+        model=OCR_MODEL,
+        contents=[
+            {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
+            OCR_PROMPT,
+        ],
+    )
+
+    text = response.text
+    return parse_ocr_response(text)
+
+
+def run_ocr_task(context, mime_type):
+    """OCR 任务执行函数：一次外部调用，成功或失败都在任务状态中明确表达。"""
+    context.set_progress(0, 0, "正在识别图片文本")
     try:
-        client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else genai.Client()
+        sentences = extract_text_cloud(context.input_path, mime_type)
+    except Exception as exc:
+        raise TaskFailure("ocr_failed", f"OCR 识别失败：{exc}") from exc
+    if not sentences:
+        raise TaskFailure("ocr_failed", "OCR 未能从图片中提取到文本")
+    logger.info("OCR识别成功，提取了%d个句子", len(sentences))
+    return sentences, None
 
-        with open(image_path, 'rb') as f:
-            image_bytes = f.read()
 
-        response = client.models.generate_content(
-            model=OCR_MODEL,
-            contents=[
-                {"inline_data": {"mime_type": "image/jpeg", "data": image_bytes}},
-                OCR_PROMPT,
-            ],
-        )
+# ---- TTS 合成 ----
 
-        text = response.text
-        sentences = parse_ocr_response(text)
-
-        logger.info(f"OCR识别成功，提取了{len(sentences)}个句子")
-        return sentences
-
-    except Exception as e:
-        logger.error(f"OCR识别失败: {str(e)}")
-        raise
-
-def create_empty_audio(filename):
-    """创建空音频文件作为后备方案"""
-    audio_path = os.path.join(AUDIO_FOLDER, filename)
-    with open(audio_path, 'wb') as audio_file:
-        audio_file.write(b'')
-    return audio_path
-
-def audio_file_has_content(audio_path):
-    """判断生成的音频文件是否可播放"""
-    return os.path.isfile(audio_path) and os.path.getsize(audio_path) > 0
-
-def validate_text(text):
-    """验证文本是否有效"""
-    if not text or not text.strip():
-        raise ValueError("输入文本为空，无法生成音频")
-    return text.strip()
-
-def generate_audio(text, filename, tts_model=None, speed_percent=None):
-    """根据选择的TTS模型生成音频"""
-    try:
-        # 验证文本
-        text = validate_text(text)
-        
-        # 根据TTS类型选择相应的生成函数
-        if tts_model["type"] == "gtts" and TTS_GTTS_AVAILABLE:
-            logger.info(f"使用GTTS服务生成音频: {filename}")
-            return generate_audio_gtts(text, filename, tts_model)
-        elif tts_model["type"] == "ms-tts" and TTS_AZURE_AVAILABLE:
-            logger.info(f"使用Azure TTS服务生成音频: {filename}")
-            return generate_audio_azure(text, filename, tts_model, speed_percent)
-        elif tts_model["type"] == "google-cloud-tts" and TTS_GOOGLE_CLOUD_AVAILABLE:
-            logger.info(f"使用Google Cloud TTS服务生成音频: {filename}")
-            return generate_audio_google_cloud(text, filename, tts_model, speed_percent)
-        else:
-            logger.warning(f"警告: 所选TTS服务不可用或未启用，无法生成音频")
-            return create_empty_audio(filename)
-    except Exception as e:
-        logger.error(f"音频生成失败: {str(e)}")
-        return create_empty_audio(filename)
-
-def generate_audio_gtts(text, filename, tts_model=None):
-    """使用Google TTS库生成音频"""
-    audio_path = os.path.join(AUDIO_FOLDER, filename)
-    if tts_model is None:
-        tts_model = tts_models["UK-Google"]
-
-    try:
-        # 使用gTTS生成音频
-        tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_model["tld"], slow=False)
-        tts.save(audio_path)
-        logger.info(f"GTTS音频生成成功: {filename}")
-        return audio_path
-    except Exception as e:
-        logger.error(f"GTTS音频生成失败: {str(e)}")
-        return create_empty_audio(filename)
-
-def generate_audio_azure(text, filename, tts_model=None, speed_percent=None):
-    """使用Azure语音服务生成音频"""
-    audio_path = os.path.join(AUDIO_FOLDER, filename)
-    if tts_model is None:
-        tts_model = tts_models["SG-man"]
-        
-    try:
-        # 配置Azure语音服务
-        speech_config = speechsdk.SpeechConfig(
-            subscription=tts_model["speech_key"], 
-            region=tts_model["service_region"]
-        )
-        speech_config.speech_synthesis_voice_name = tts_model["voice_name"]
-        
-        # 创建音频输出配置
-        audio_config = speechsdk.audio.AudioOutputConfig(filename=audio_path)
-        speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-        
-        # 使用SSML格式设置语音
-        speed = format_speed_percent(speed_percent) if speed_percent is not None else tts_model["speed"]
-        ssml_body = html.escape(text, quote=False)
-        ssml_text = f"""
+def build_ssml(text, voice_name, speed):
+    """与既有 SSML 结构保持一致：文本转义，prosody 控制语速。"""
+    ssml_body = html.escape(text, quote=False)
+    return f"""
 <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-    <voice name='{tts_model["voice_name"]}'>
+    <voice name='{voice_name}'>
         <prosody rate='{speed}'>
             {ssml_body}
         </prosody>
     </voice>
 </speak>
 """
-        
-        # 合成音频
-        result = speech_synthesizer.speak_ssml_async(ssml_text).get()
-        
-        # 检查结果
-        if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
-            with open(audio_path, 'wb') as f:
-                f.write(result.audio_data)
-            logger.info(f"Azure TTS生成成功: {filename}")
-            return audio_path
+
+
+def synthesize_azure_rest(text, tts_model, speed_percent, output_path):
+    """Azure 文本转语音 REST 接口（NAS_MIGRATION §3.5 步骤 1 选定实现）。
+
+    超时 (connect, read) = (5, 30) 秒，requests 默认不自动重试；
+    失败直接抛出异常，不写空文件。
+    """
+    speech_key = tts_model.get("speech_key")
+    if not speech_key:
+        raise ValueError("Azure Speech 密钥未配置（AZURE_API_KEY）")
+    speed = format_speed_percent(speed_percent) if speed_percent is not None else tts_model["speed"]
+    ssml = build_ssml(text, tts_model["voice_name"], speed)
+    url = f"https://{tts_model['service_region']}.tts.speech.microsoft.com/cognitiveservices/v1"
+    headers = {
+        "Ocp-Apim-Subscription-Key": speech_key,
+        "Content-Type": "application/ssml+xml",
+        "X-Microsoft-OutputFormat": AZURE_OUTPUT_FORMAT,
+    }
+    response = requests.post(
+        url,
+        data=ssml.encode("utf-8"),
+        headers=headers,
+        timeout=(AZURE_REST_CONNECT_TIMEOUT, AZURE_REST_READ_TIMEOUT),
+    )
+    response.raise_for_status()
+    if not response.content:
+        raise ValueError("Azure TTS 返回空音频")
+    output_path.write_bytes(response.content)
+
+
+def synthesize_gtts(text, tts_model, output_path):
+    """gTTS：构造器显式传入有限超时（2.5.4 默认无限等待）。"""
+    if not TTS_GTTS_AVAILABLE:
+        raise ValueError("gtts 库未安装，gTTS 引擎不可用")
+    tts = gTTS(text=text, lang=tts_model["lang"], tld=tts_model["tld"],
+               slow=False, timeout=GTTS_TIMEOUT_SECONDS)
+    try:
+        tts.save(str(output_path))
+    except Exception:
+        output_path.unlink(missing_ok=True)
+        raise
+    if not output_path.is_file() or output_path.stat().st_size == 0:
+        output_path.unlink(missing_ok=True)
+        raise ValueError("gTTS 未产生有效音频")
+
+
+_google_cloud_tts_client = None
+
+
+def get_google_cloud_tts_client():
+    """惰性创建 Google Cloud TTS 客户端（进程内复用）。"""
+    global _google_cloud_tts_client
+    if _google_cloud_tts_client is None:
+        credentials_json = get_env_first(
+            "GOOGLE_CLOUD_TTS_CREDENTIALS_JSON",
+            "GOOGLE_CREDENTIALS_JSON",
+            "GOOGLE_SERVICE_ACCOUNT_JSON",
+            "GCP_SERVICE_ACCOUNT_JSON",
+        )
+        if credentials_json:
+            credentials = service_account.Credentials.from_service_account_info(json.loads(credentials_json))
+            _google_cloud_tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
         else:
-            # 处理错误情况
-            if result.reason == speechsdk.ResultReason.Canceled:
-                details = result.cancellation_details
-                error_msg = f"Azure TTS取消: {details.reason}"
-                if details.reason == speechsdk.CancellationReason.Error:
-                    error_msg += f", 错误详情: {details.error_details}"
-                raise ValueError(error_msg)
-            else:
-                raise ValueError(f"Azure TTS失败，未知原因: {result.reason}")
-    except Exception as e:
-        logger.error(f"Azure TTS生成失败: {str(e)}")
-        return create_empty_audio(filename)
+            _google_cloud_tts_client = texttospeech.TextToSpeechClient()
+    return _google_cloud_tts_client
 
-def create_google_cloud_tts_client():
-    """创建Google Cloud TTS客户端，支持ADC或环境变量中的服务账号JSON"""
-    credentials_json = get_env_first(
-        "GOOGLE_CLOUD_TTS_CREDENTIALS_JSON",
-        "GOOGLE_CREDENTIALS_JSON",
-        "GOOGLE_SERVICE_ACCOUNT_JSON",
-        "GCP_SERVICE_ACCOUNT_JSON"
+
+def synthesize_google_cloud(text, tts_model, speed_percent, output_path):
+    """Google Cloud TTS：按调用传入超时，并显式关闭默认重试。"""
+    if not TTS_GOOGLE_CLOUD_AVAILABLE:
+        raise ValueError("google-cloud-texttospeech 库未安装，Google Cloud TTS 引擎不可用")
+    client = get_google_cloud_tts_client()
+    input_text = texttospeech.SynthesisInput(text=text)
+    voice = texttospeech.VoiceSelectionParams(
+        language_code=tts_model["language_code"],
+        name=tts_model["voice_name"],
     )
-    if credentials_json:
-        credentials_info = json.loads(credentials_json)
-        credentials = service_account.Credentials.from_service_account_info(credentials_info)
-        return texttospeech.TextToSpeechClient(credentials=credentials)
-
-    credentials_file = get_env_first(
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_CLOUD_TTS_CREDENTIALS_FILE",
-        "GOOGLE_SERVICE_ACCOUNT_FILE",
-        "GCP_SERVICE_ACCOUNT_FILE"
-    )
-    if credentials_file:
-        credentials = service_account.Credentials.from_service_account_file(credentials_file)
-        return texttospeech.TextToSpeechClient(credentials=credentials)
-
-    return texttospeech.TextToSpeechClient()
-
-def generate_audio_google_cloud(text, filename, tts_model=None, speed_percent=None):
-    """使用Google Cloud Text-to-Speech生成音频"""
-    audio_path = os.path.join(AUDIO_FOLDER, filename)
-    if tts_model is None:
-        tts_model = tts_models["English-Chirp"]
-
-    try:
-        client = create_google_cloud_tts_client()
-        input_text = texttospeech.SynthesisInput(text=text)
-        voice = texttospeech.VoiceSelectionParams(
-            language_code=tts_model["language_code"],
-            name=tts_model["voice_name"],
-        )
-        speed = format_google_cloud_speaking_rate(
-            speed_percent if speed_percent is not None else tts_model.get("speed")
-        )
-        audio_config = texttospeech.AudioConfig(
-            audio_encoding=texttospeech.AudioEncoding.MP3,
-            speaking_rate=speed,
-        )
-
-        response = client.synthesize_speech(
-            input=input_text,
-            voice=voice,
-            audio_config=audio_config,
-        )
-        with open(audio_path, 'wb') as f:
-            f.write(response.audio_content)
-        logger.info(f"Google Cloud TTS生成成功: {filename}")
-        return audio_path
-    except Exception as e:
-        logger.error(f"Google Cloud TTS生成失败: {str(e)}")
-        return create_empty_audio(filename)
-
-
-
-def clean_audio_folder():
-    """清理音频文件夹中的所有MP3文件"""
-    try:
-        count = 0
-        for audio_file in os.listdir(AUDIO_FOLDER):
-            if audio_file.endswith('.mp3'):
-                audio_path = os.path.join(AUDIO_FOLDER, audio_file)
-                os.remove(audio_path)
-                count += 1
-        logger.info(f"已清理{count}个音频文件")
-        return True
-    except Exception as e:
-        logger.error(f"清理音频文件时出错: {e}")
-        return False
-
-def update_processing_status(**kwargs):
-    """安全更新全局处理状态"""
-    global processing_status
-    processing_status.update(kwargs)
-
-def start_processing_stage(stage, message, request_id=None):
-    """开始新的处理阶段，避免前端读到上一轮任务状态"""
-    update_processing_status(
-        status='processing',
-        stage=stage,
-        request_id=request_id,
-        message=message,
-        current=0,
-        total=0,
-        progress=0
-    )
-
-def finish_processing_with_error(message):
-    """结束当前处理阶段，避免错误返回后前端继续轮询"""
-    update_processing_status(
-        status='done',
-        message=message,
-        progress=100
-    )
-
-def get_bold_word_texts(sentence):
-    """兼容OCR原始结果和TTS生成后的重点词结构"""
-    words = []
-    for word in sentence.get('bold_words') or []:
-        if isinstance(word, dict):
-            word = word.get('word', '')
-        if str(word).strip():
-            words.append(str(word).strip())
-    return words
-
-def sentence_has_audio(sentence):
-    """判断句子或重点词结果里是否有可播放音频"""
-    if sentence.get('audio_path'):
-        return True
-    return any(
-        isinstance(word, dict) and word.get('audio_path')
-        for word in sentence.get('bold_words') or []
-    )
-
-def process_bold_words(sentence, idx, tts_model, run_id, speed_percent=None):
-    """处理句子中的加粗单词，生成音频和HTML"""
-    word_audios = []
-    html_text = sanitize_html(sentence.get('original_text') or sentence['text'])
-    bold_words = get_bold_word_texts(sentence)
-    
-    if not bold_words:
-        return [], html_text, False
-    
-    for widx, word in enumerate(bold_words):
-        try:
-            audio_filename = f'{run_id}_word_{idx}_{widx}.mp3'
-
-            # 生成单词音频
-            audio_path = generate_audio(
-                word,
-                audio_filename,
-                tts_model,
-                speed_percent
-            )
-
-            if not audio_file_has_content(audio_path):
-                logger.warning(f"跳过空单词音频: {audio_filename}")
-                continue
-            
-            # 添加到结果列表
-            word_audios.append({
-                'word': word,
-                'audio_path': f'/audio/{audio_filename}'
-            })
-            
-            # 创建带播放按钮的HTML
-            safe_word = sanitize_html(word)
-            button_html = f'<span class="word-item bold" onclick="playAudio(\'{audio_filename}\')"><i class="bi bi-play-circle-fill"></i> {safe_word}</span>'
-            
-            # 替换HTML中的单词
-            pattern = r'\b' + re.escape(word) + r'\b'
-            html_text = re.sub(pattern, button_html, html_text, count=1)
-            
-        except Exception as e:
-            logger.error(f"单词音频生成错误: {e}")
-            continue
-    
-    return word_audios, html_text, len(word_audios) > 0
-
-def process_sentence(sentence, idx, tts_model, processed_count, total_sentences, run_id, speed_percent=None):
-    """处理单个句子，生成音频和数据结构"""
-    # 初始化基本信息
-    sentence_data = {
-        'text': sentence['text'],
-        'original_text': sentence.get('original_text', sentence['text']),
-        'is_title': sentence.get('is_title', False),
-        'title': sentence.get('title', ''),
-        'has_bold_words': False,
-        'html_text': sanitize_html(sentence.get('original_text') or sentence['text'])
-    }
-    
-    # 更新处理状态
-    update_processing_status(
-        status='processing',
-        message=f'正在处理第 {processed_count}/{total_sentences} 个句子',
-        current=processed_count,
-        total=total_sentences,
-        progress=int((processed_count / total_sentences) * 100)
-    )
-    
-    # 生成整句音频 (不再有Word Wall的跳过逻辑)
-    audio_filename = f'{run_id}_sentence_{idx}.mp3'
-    audio_path = generate_audio(
-        sentence['text'],
-        audio_filename,
-        tts_model,
-        speed_percent
-    )
-    if audio_file_has_content(audio_path):
-        sentence_data['audio_path'] = audio_filename
+    if speed_percent is not None:
+        speaking_rate = format_google_cloud_speaking_rate(speed_percent)
     else:
-        logger.warning(f"跳过空句子音频: {audio_filename}")
-    
-    # 处理加粗单词
-    if get_bold_word_texts(sentence):
-        update_processing_status(message=f'正在处理第 {processed_count}/{total_sentences} 个句子的加粗单词')
-        word_audios, html_text, has_bold_words = process_bold_words(sentence, idx, tts_model, run_id, speed_percent)
-        
-        sentence_data['bold_words'] = word_audios
-        sentence_data['has_bold_words'] = has_bold_words
-        sentence_data['html_text'] = html_text
-        
-    return sentence_data
+        speaking_rate = format_google_cloud_speaking_rate(tts_model.get("speed"))
+    audio_config = texttospeech.AudioConfig(
+        audio_encoding=texttospeech.AudioEncoding.MP3,
+        speaking_rate=speaking_rate,
+    )
+    response = client.synthesize_speech(
+        input=input_text,
+        voice=voice,
+        audio_config=audio_config,
+        retry=None,
+        timeout=GOOGLE_CLOUD_TTS_TIMEOUT_SECONDS,
+    )
+    if not response.audio_content:
+        raise ValueError("Google Cloud TTS 返回空音频")
+    output_path.write_bytes(response.audio_content)
 
-@app.route('/upload', methods=['POST'])
-def upload_file():
-    """处理上传的图片文件，只执行OCR"""
-    start_processing_stage('ocr', '正在上传图片', request.form.get('request_id'))
 
-    try:
-        if 'file' not in request.files:
-            finish_processing_with_error('没有文件上传')
-            return jsonify({'error': '没有文件上传'}), 400
+def synthesize_item(text, tts_model, speed_percent, output_path):
+    """合成单个条目并写入任务目录；失败抛异常，不生成空文件。"""
+    if not text or not text.strip():
+        raise ValueError("输入文本为空，无法生成音频")
+    text = text.strip()
+    tts_type = tts_model["type"]
+    if tts_type == "ms-tts":
+        synthesize_azure_rest(text, tts_model, speed_percent, output_path)
+    elif tts_type == "gtts":
+        # gTTS 不支持语速，非默认速度在校验层已被忽略
+        synthesize_gtts(text, tts_model, output_path)
+    elif tts_type == "google-cloud-tts":
+        synthesize_google_cloud(text, tts_model, speed_percent, output_path)
+    else:
+        raise ValueError(f"未知TTS类型: {tts_type}")
 
-        file = request.files['file']
-        if file.filename == '':
-            finish_processing_with_error('未选择文件')
-            return jsonify({'error': '未选择文件'}), 400
 
-        update_processing_status(message='保存上传的图片')
-        filename = safe_filename(file.filename)
-        image_path = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(image_path)
-        logger.info(f"已保存图片: {image_path}")
+def run_tts_task(context, sentences, tts_model, speed_percent):
+    """TTS 任务执行函数：串行合成，进度按尝试次数计数，预算在连续调用之间检查。"""
+    speak_rows = [(idx, row) for idx, row in enumerate(sentences) if not row["is_title"]]
+    total = len(speak_rows) + sum(len(row["bold_words"]) for _, row in speak_rows)
+    context.set_progress(0, total, "开始生成音频")
 
-        update_processing_status(message='清理之前的音频文件')
-        clean_audio_folder()
+    current = 0
+    warnings = []
+    any_audio = False
+    built = {}
+
+    for idx, row in speak_rows:
+        output_row = {
+            "text": row["text"],
+            "original_text": row["original_text"],
+            "is_title": False,
+            "title": row["title"],
+            "bold_words": [],
+        }
+
+        sentence_out = f"sentence_{idx}.mp3"
+        if context.elapsed_seconds() >= TASK_BUDGET_SECONDS:
+            warnings.append(f"句子 {idx + 1} 未尝试：任务执行预算已耗尽")
+        else:
+            try:
+                synthesize_item(row["text"], tts_model, speed_percent,
+                                context.task_dir / sentence_out)
+                output_row["audio_path"] = f"/audio/{context.task_id}/{sentence_out}"
+                any_audio = True
+            except Exception as exc:
+                warnings.append(f"句子 {idx + 1} 音频生成失败：{exc}")
+            current += 1
+            context.set_progress(current, total, f"正在生成音频 {current}/{total}")
+
+        for widx, word in enumerate(row["bold_words"]):
+            word_out = f"word_{idx}_{widx}.mp3"
+            word_entry = {"word": word}
+            if context.elapsed_seconds() >= TASK_BUDGET_SECONDS:
+                warnings.append(f"重点词 {word} 未尝试：任务执行预算已耗尽")
+            else:
+                try:
+                    synthesize_item(word, tts_model, speed_percent,
+                                    context.task_dir / word_out)
+                    word_entry["audio_path"] = f"/audio/{context.task_id}/{word_out}"
+                    any_audio = True
+                except Exception as exc:
+                    warnings.append(f"重点词 {word} 音频生成失败：{exc}")
+                current += 1
+                context.set_progress(current, total, f"正在生成音频 {current}/{total}")
+            output_row["bold_words"].append(word_entry)
+
+        built[idx] = output_row
+
+    # 按原顺序组装结果，标题行原样保留
+    result = []
+    for idx, row in enumerate(sentences):
+        if row["is_title"]:
+            result.append({
+                "text": row["text"],
+                "original_text": row["original_text"],
+                "is_title": True,
+                "title": row["title"],
+            })
+        else:
+            result.append(built[idx])
+
+    if not any_audio:
+        if current == 0 and context.elapsed_seconds() >= TASK_BUDGET_SECONDS:
+            raise TaskFailure("tts_failed", "任务执行预算已耗尽，未能生成任何音频")
+        reason = warnings[0] if warnings else "未知原因"
+        raise TaskFailure("tts_failed", f"全部音频生成失败：{reason}")
+
+    return result, warnings or None
+
+
+# ---- 应用与路由 ----
+
+def _error_response(status, code, message):
+    return jsonify({"error": {"code": code, "message": message}}), status
+
+
+def _require_session_id():
+    """写接口与状态查询都要求有效会话；缺少时返回 403（状态查询处另行处理）。"""
+    sid = session.get("sid")
+    if not sid:
+        abort(403)
+    return sid
+
+
+def _require_same_origin():
+    """写接口同源检查：拒绝不匹配的 Origin；无 Origin 时按 Referer 校验；都没有则拒绝。"""
+    header = request.headers.get("Origin") or request.headers.get("Referer")
+    if not header:
+        abort(403)
+    match = re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+)", header)
+    if not match or match.group(1) != request.host:
+        abort(403)
+
+
+def create_app(task_manager, *, max_content_length=MAX_REQUEST_BYTES):
+    """构建 Flask 应用；测试可注入独立 TaskManager 与更小的请求体上限。"""
+    flask_app = Flask(__name__)
+    flask_app.config.update(
+        SECRET_KEY=os.environ["SECRET_KEY"],
+        MAX_CONTENT_LENGTH=max_content_length,
+        SESSION_COOKIE_NAME="endictation_session",
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        # 本阶段为本机/受信 LAN HTTP 验证，不启用仅 HTTPS 可发送的 Secure cookie
+        SESSION_COOKIE_SECURE=False,
+        PERMANENT_SESSION_LIFETIME=timedelta(days=SESSION_LIFETIME_DAYS),
+    )
+
+    @flask_app.errorhandler(413)
+    def request_too_large(_error):
+        return _error_response(413, "too_large", "请求体超过大小限制，未被受理")
+
+    @flask_app.errorhandler(403)
+    def forbidden(_error):
+        return _error_response(403, "forbidden", "缺少有效会话或同源检查未通过")
+
+    @flask_app.get("/")
+    def index():
+        if "sid" not in session:
+            session["sid"] = uuid.uuid4().hex
+            session.permanent = True
+        return render_template(
+            "index.html",
+            tts_options=get_tts_options(),
+            tts_engines=tts_engines,
+            tts_languages=tts_languages,
+            voice_genders=voice_genders,
+            tts_voice_matrix=tts_voice_matrix,
+        )
+
+    @flask_app.get("/health")
+    def health():
+        """只证明进程可响应，不调用收费 API，也不宣称凭据有效。"""
+        return jsonify({"status": "ok"})
+
+    @flask_app.post("/upload")
+    def upload_file():
+        """受理 OCR 任务：校验后立即返回 202，OCR 在后台执行。"""
+        _require_same_origin()
+        sid = _require_session_id()
+
+        if "file" not in request.files:
+            return _error_response(400, "invalid_input", "没有文件上传")
+        file = request.files["file"]
+        if not file.filename:
+            return _error_response(400, "invalid_input", "未选择文件")
+
+        holder = {}
+
+        def input_saver(task_dir):
+            input_name, mime_type = validate_and_save_image(file, task_dir)
+            holder["mime_type"] = mime_type
+            return str(task_dir / input_name)
+
+        def execute(context):
+            return run_ocr_task(context, holder["mime_type"])
 
         try:
-            update_processing_status(message='正在进行OCR识别')
-            sentences = extract_text_cloud(image_path)
+            snapshot = task_manager.submit(
+                stage="ocr", owner=sid, execute=execute, input_saver=input_saver)
+        except RequestValidationError as exc:
+            return _error_response(exc.status, exc.code, exc.message)
+        except CapacityError as exc:  # noqa: F821 - 来自 tasks 模块
+            return _error_response(429, "capacity", str(exc))
+        return jsonify({
+            "task_id": snapshot["task_id"],
+            "status_url": f"/tasks/{snapshot['task_id']}",
+        }), 202
 
-            if not sentences:
-                finish_processing_with_error('OCR识别失败，未能提取文本')
-                return jsonify({'error': 'OCR识别失败，未能提取文本'}), 500
+    @flask_app.post("/generate-tts")
+    def generate_tts():
+        """受理 TTS 任务：校验后立即返回 202，合成在后台执行。"""
+        _require_same_origin()
+        sid = _require_session_id()
 
-        except Exception as e:
-            logger.error(f"OCR处理错误: {e}")
-            finish_processing_with_error('OCR处理错误')
-            return jsonify({'error': f'OCR处理错误: {str(e)}'}), 500
+        data = request.get_json(silent=True)
+        if data is None:
+            return _error_response(400, "invalid_input", "请求体不是有效 JSON")
+        try:
+            sentences, tts_model, speed_percent = validate_tts_request(data)
+        except RequestValidationError as exc:
+            return _error_response(exc.status, exc.code, exc.message)
 
-        total_sentences = len(sentences)
-        update_processing_status(
-            status='done',
-            message='OCR识别完成',
-            current=total_sentences,
-            total=total_sentences,
-            progress=100
-        )
-        logger.info(f"OCR处理完成，共提取{len(sentences)}个句子数据")
+        def execute(context):
+            return run_tts_task(context, sentences, tts_model, speed_percent)
 
-        return jsonify(sentences)
-    except Exception as e:
-        logger.error(f"上传处理过程中发生错误: {e}")
-        finish_processing_with_error('图片处理失败')
-        return jsonify({'error': f'处理失败: {str(e)}'}), 500
+        try:
+            snapshot = task_manager.submit(stage="tts", owner=sid, execute=execute)
+        except CapacityError as exc:  # noqa: F821
+            return _error_response(429, "capacity", str(exc))
+        return jsonify({
+            "task_id": snapshot["task_id"],
+            "status_url": f"/tasks/{snapshot['task_id']}",
+        }), 202
 
-@app.route('/generate-tts', methods=['POST'])
-def generate_tts():
-    """根据OCR结果单独生成TTS音频"""
+    @flask_app.get("/tasks/<task_id>")
+    def get_task(task_id):
+        """任务状态查询；轮询返回 200 不代表任务成功，由 status 字段表达结果。"""
+        sid = session.get("sid")
+        snapshot = task_manager.get(task_id, sid) if sid else None
+        if snapshot is None:
+            # 统一提示，不区分不存在、过期与不属于该会话
+            return _error_response(404, "task_not_found", "任务不存在或已过期")
+        return jsonify(snapshot)
+
+    @flask_app.get("/audio/<task_id>/<filename>")
+    def serve_audio(task_id, filename):
+        """按任务目录返回音频；文件名受限，owner 校验失败或清理竞争均返回 404。"""
+        sid = session.get("sid")
+        if not sid or not AUDIO_FILENAME_RE.match(filename):
+            return _error_response(404, "not_found", "音频不存在或已过期")
+        task_dir = task_manager.task_dir(task_id, sid)
+        if task_dir is None or not (task_dir / filename).is_file():
+            return _error_response(404, "not_found", "音频不存在或已过期")
+        return send_from_directory(task_dir, filename, mimetype="audio/mpeg")
+
+    return flask_app
+
+
+# ---- 启动引导 ----
+
+def bootstrap_runtime(data_dir_env=None):
+    """进程启动入口检查与初始化；Gunicorn worker 导入与 python app.py 共用。
+
+    - 必须设置 SECRET_KEY，无任何回退默认值；
+    - 任务目录必须可写，权限错误直接启动失败并给出路径与所需权限。
+    """
+    if not os.environ.get("SECRET_KEY"):
+        raise RuntimeError(
+            "启动失败：必须设置环境变量 SECRET_KEY（用于会话签名），不得使用回退默认值。")
+    data_dir = Path(data_dir_env or os.environ.get("DATA_DIR") or DEFAULT_DATA_DIR)
+    tasks_root = data_dir / "tasks"
     try:
-        data = request.get_json(silent=True) or {}
-        start_processing_stage('tts', '开始生成音频', data.get('request_id'))
-        sentences = data.get('sentences') or []
-        if not isinstance(sentences, list) or not sentences:
-            finish_processing_with_error('没有可生成音频的OCR文本')
-            return jsonify({'error': '没有可生成音频的OCR文本'}), 400
+        tasks_root.mkdir(parents=True, exist_ok=True)
+        probe = tasks_root / ".write-probe"
+        probe.write_text("")
+        probe.unlink()
+    except OSError as exc:
+        raise RuntimeError(
+            f"启动失败：任务目录 {tasks_root} 不可写（需要写入权限）：{exc}") from exc
+    task_manager = TaskManager(tasks_root)
+    # 进程重启后旧任务一律失效：只清理本应用专属任务目录
+    task_manager.purge_all_task_dirs()
+    task_manager.start_cleanup_loop()
+    logger.info("运行数据目录：%s", tasks_root)
+    return task_manager
 
-        tts_key = resolve_tts_key(data)
-        tts_model = tts_models.get(tts_key, tts_models['UK-Google'])
-        speed_percent = None
-        if tts_supports_speed(tts_model):
-            default_speed = parse_speed_percent(tts_model.get('speed'))
-            speed_percent = parse_speed_percent(data.get('speed'), default_speed)
 
-        update_processing_status(message='清理之前的音频文件')
-        clean_audio_folder()
+manager = bootstrap_runtime()
+app = create_app(manager)
 
-        items_to_speak = [sentence for sentence in sentences if sentence.get('text') and not sentence.get('is_title')]
-        if not items_to_speak:
-            finish_processing_with_error('没有可生成音频的句子')
-            return jsonify({'error': '没有可生成音频的句子'}), 400
-
-        total_sentences = len(items_to_speak)
-        processed_count = 0
-        run_id = uuid.uuid4().hex[:8]
-        result = []
-
-        for idx, sentence in enumerate(sentences):
-            if sentence.get('is_title'):
-                result.append({
-                    'text': sentence.get('text', ''),
-                    'bold_words': get_bold_word_texts(sentence),
-                    'original_text': sentence.get('original_text', sentence.get('text', '')),
-                    'is_title': True,
-                    'title': sentence.get('title', sentence.get('text', '')),
-                    'has_bold_words': False
-                })
-                continue
-
-            try:
-                processed_count += 1
-                sentence_data = process_sentence(
-                    sentence, idx, tts_model,
-                    processed_count, total_sentences,
-                    run_id, speed_percent
-                )
-                result.append(sentence_data)
-            except Exception as e:
-                logger.error(f"句子TTS处理错误: {e}")
-                continue
-
-        if not result:
-            finish_processing_with_error('音频生成失败，未能处理任何文本')
-            return jsonify({'error': '音频生成失败，未能处理任何文本'}), 500
-
-        has_audio = any(sentence_has_audio(item) for item in result)
-        if not has_audio:
-            update_processing_status(
-                status='done',
-                message='音频生成失败',
-                current=processed_count,
-                total=total_sentences,
-                progress=100
-            )
-            return jsonify({'error': '音频生成失败，请检查TTS凭证或稍后重试'}), 500
-
-        update_processing_status(
-            status='done',
-            message='音频生成完成',
-            current=total_sentences,
-            total=total_sentences,
-            progress=100
-        )
-        logger.info(f"音频生成完成，共生成{processed_count}个句子数据")
-
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"TTS生成过程中发生错误: {e}")
-        finish_processing_with_error('TTS生成失败')
-        return jsonify({'error': f'TTS生成失败: {str(e)}'}), 500
-
-@app.route('/audio/<filename>')
-def serve_audio(filename):
-    filename = safe_filename(filename)
-    audio_path = os.path.join(AUDIO_FOLDER, filename)
-    if not audio_file_has_content(audio_path):
-        return jsonify({'error': '文件不存在'}), 404
-    return send_file(audio_path, mimetype='audio/mpeg', as_attachment=False)
-
-# 初始化处理状态
-def init_processing_status():
-    return {
-        'status': 'idle',  # idle, processing, done
-        'stage': 'idle',
-        'request_id': None,
-        'message': '准备就绪',
-        'current': 0,
-        'total': 0,
-        'progress': 0
-    }
-
-# 创建处理状态实例
-processing_status = init_processing_status()
-
-@app.route('/status')
-def get_status():
-    return jsonify(processing_status)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5001)), help='Port to run the server on')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5001)),
+                        help='Port to run the server on')
     args = parser.parse_args()
     app.run(host='0.0.0.0', debug=False, port=args.port)
