@@ -55,11 +55,11 @@ Azure App Service 不适合引用本机 JSON 文件路径。部署到 Azure 时�
 
 ## Azure App Service 部署
 
-NAS 迁移尚未实施，项目改造计划见 [NAS 迁移计划](docs/NAS_MIGRATION.md)。本阶段不包含公网配置。
+NAS 迁移进行中，项目改造计划见 [NAS 迁移计划](docs/NAS_MIGRATION.md)。本阶段不包含公网配置。
 
-本应用已适配 Azure App Service，push 到 `main` 分支通过 GitHub Actions 自动部署。
+迁移期间 GitHub Actions 仅执行构建/测试，不再部署 Azure。现有 Azure 网页保持已部署版本，不随 `main` 推送更新；Azure 服务的停用在迁移彻底完成后另行确认。
 
-### Azure 应用设置
+### Azure 应用设置（仅适用于既有线上版本）
 
 在 Azure 门户的应用设置中配置：
 - `GOOGLE_API_KEY`: Gemini API 密钥

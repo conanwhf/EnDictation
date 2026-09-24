@@ -1,8 +1,7 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
+# 迁移期间仅构建/测试：Azure App Service 部署已按 NAS 迁移计划（docs/NAS_MIGRATION.md 步骤 0）移除。
+# 现有 Azure 网页保持已部署版本，不再随 main 推送更新。
 
-name: Build and deploy Python app to Azure Web App - EnDictaion
+name: Build and test EnDictation
 
 on:
   push:
@@ -28,57 +27,9 @@ jobs:
         run: |
           python -m venv venv
           source venv/bin/activate
-      
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run syntax check
         run: python -m py_compile app.py
-
-      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
-
-      - name: Zip artifact for deployment
-        run: zip release.zip ./* -r
-
-      - name: Upload artifact for deployment jobs
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-app
-          path: |
-            release.zip
-            !venv/
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build
-    environment:
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
-
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: python-app
-
-      - name: Unzip artifact for deployment
-        run: unzip release.zip
-
-      
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_B3015BD33DDD40A1ABFCCF8687B0A245 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C65B9AF1DB26471DBFC3003B602742C6 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7AFB251769E9407EBCBDE664214319AA }}
-
-      - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v3
-        id: deploy-to-webapp
-        with:
-          app-name: 'EnDictaion'
-          slot-name: 'Production'
-          

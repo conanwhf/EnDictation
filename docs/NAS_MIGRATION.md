@@ -311,7 +311,10 @@ docker compose -f compose.nas.yml logs --tail=100
 
 ## 8. 交付状态与后续边界
 
-当前仅完成迁移计划编写，以上实施步骤和验收用例均未执行。
+### 交付进度
+
+- 2026-09-24 步骤 0 完成（本地提交，未推送）：`.github/workflows/main_endictaion.yml` 移除 `deploy` job、Azure OIDC 登录、`id-token: write` 权限及部署用 zip/artifact 步骤，仅保留构建/语法检查。README 中「push 到 main 自动部署 Azure」的描述已同步删除。现有 Azure 网页保持已部署版本；首次推送将包含本工作流修改与全部迁移代码。
+- 其余步骤（1-6）未执行。步骤 1 的真实 Azure 合成与真实图片 OCR 用例因当前无凭据标记为未验证，按用户指示采用 REST 路径继续实施（结论待步骤 1 受控故障测试后写回 §3.5）。
 
 项目改造交付时应报告：实际修改文件、自动化结果、本地容器结果、真实 API/浏览器结果、未验证项。若只完成本地验证，应写「可进入 NAS 部署验证」，不能写「NAS 已迁移完成」。
 
