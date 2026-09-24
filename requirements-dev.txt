@@ -1,0 +1,2 @@
+# 测试依赖，与运行依赖分开；运行 python -m pytest tests/ -q
+pytest

@@ -23,13 +23,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Create and start virtual environment
+      - name: Create virtual environment
         run: |
           python -m venv venv
-          source venv/bin/activate
+          echo "$PWD/venv/bin" >> $GITHUB_PATH
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
 
       - name: Run syntax check
-        run: python -m py_compile app.py
+        run: python -m py_compile app.py tasks.py

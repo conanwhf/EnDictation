@@ -324,7 +324,8 @@ docker compose -f compose.nas.yml logs --tail=100
 
 - 2026-09-24 步骤 0 完成（本地提交，未推送）：`.github/workflows/main_endictaion.yml` 移除 `deploy` job、Azure OIDC 登录、`id-token: write` 权限及部署用 zip/artifact 步骤，仅保留构建/语法检查。README 中「push 到 main 自动部署 Azure」的描述已同步删除。现有 Azure 网页保持已部署版本；首次推送将包含本工作流修改与全部迁移代码。
 - 2026-09-24 步骤 1 完成（本地提交，未推送）：Azure 合成路径验证。受控故障测试 6/6 通过（详见 §3.5 步骤 1 验证结论），选定 REST 实现（requests、`timeout=(5, 30)`、`audio-24khz-48kbitrate-mono-mp3`）。真实 Azure 合成因无凭据记为未验证；真实图片 OCR 同样待 `GOOGLE_API_KEY`。验证脚本保留在 `tools/verify_azure_rest.py`（`--real` 补做真实合成）。
-- 其余步骤（2-6）未执行。
+- 2026-09-24 步骤 2 完成（本地提交，未推送）：先写针对性测试再实现 `tasks.py`（`tests/test_tasks.py` 16 项全部通过）。覆盖任务创建、FIFO 受理序执行、容量拒绝与过期恢复、owner 校验、过期清理（记录+目录）、排队/执行中任务不过期、输入文件排队保留/结束后删除、进度与 warnings、快照隔离、提交失败撤销、启动清目录、后台清理线程。CI 工作流加入 pytest 步骤并修正虚拟环境 PATH 传递。外部操作全部为可控制假实现，不触网。
+- 其余步骤（3-6）未执行。
 
 项目改造交付时应报告：实际修改文件、自动化结果、本地容器结果、真实 API/浏览器结果、未验证项。若只完成本地验证，应写「可进入 NAS 部署验证」，不能写「NAS 已迁移完成」。
 
