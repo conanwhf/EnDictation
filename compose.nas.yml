@@ -1,0 +1,37 @@
+# NAS 容器编排（docs/NAS_MIGRATION.md §5）
+# 仅本机/受信 LAN 验证：端口只绑定回环地址，未来 NAS 的实际端口与 LAN 绑定留到部署阶段确认。
+# 不含任何公网组件。
+#
+# 用法：
+#   SECRET_KEY=... [GOOGLE_API_KEY=...] docker compose -f compose.nas.yml up -d
+
+services:
+  endictation:
+    build: .
+    image: endictation:nas
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      # 缺失时 compose config 直接失败，不在文件中落任何默认值
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY required}
+      DATA_DIR: /data
+      # 以下凭据均通过进程环境注入；空值与应用内"未配置"等价
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      AZURE_API_KEY: ${AZURE_API_KEY:-}
+      AZURE_SPEECH_REGION: ${AZURE_SPEECH_REGION:-southeastasia}
+      GOOGLE_CLOUD_TTS_CREDENTIALS_JSON: ${GOOGLE_CLOUD_TTS_CREDENTIALS_JSON:-}
+    ports:
+      # 只绑定回环地址；不使用会绑定全部网卡的 "15901:5001" 简写
+      - "127.0.0.1:15901:5001"
+    volumes:
+      - endictation-data:/data
+    healthcheck:
+      # 用 Python 标准库请求 /health，不额外安装 curl；只证明进程可响应
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  endictation-data:
