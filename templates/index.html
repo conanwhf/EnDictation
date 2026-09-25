@@ -627,6 +627,10 @@
                 stopPolling();
                 onTaskFinishedUI();
                 if (task.status === 'succeeded') {
+                    // 保留 OCR 原始数据供重复生成 TTS（不触发新 OCR）
+                    if (task.stage === 'ocr') {
+                        currentOcrData = task.result;
+                    }
                     displayResults(task.result);
                     if (task.warnings && task.warnings.length) {
                         showWarnings(task.warnings);
