@@ -143,7 +143,7 @@ EnDictation/
 
 | 服务 | 实现 | 超时 |
 |------|------|------|
-| Gemini OCR | google-genai（`Client(http_options={timeout, retry_options: attempts=1})`） | 120 秒 |
+| Gemini OCR | google-genai（`Client(http_options={timeout, retry_options: attempts=1})`） | 120 秒（`HttpOptions.timeout` 单位为毫秒，传 `120000`；真实测试证实误传秒值会在约 1 秒触发 read timeout） |
 | Azure TTS | 文本转语音 REST `POST https://{region}.tts.speech.microsoft.com/cognitiveservices/v1`，`X-Microsoft-OutputFormat: audio-24khz-48kbitrate-mono-mp3`，requests | `(connect 5s, read 30s)` |
 | gTTS | gTTS 2.5.4 构造器 `timeout=`（默认无限等待，必须显式传入） | 30 秒 |
 | Google Cloud TTS | `synthesize_speech(..., retry=None, timeout=)` | 30 秒 |

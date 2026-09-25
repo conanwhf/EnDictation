@@ -71,7 +71,9 @@ SPEED_MIN, SPEED_MAX = -50, 50                # 语速百分比范围
 SESSION_LIFETIME_DAYS = 7                     # 会话 cookie 生存期
 
 OCR_MODEL = "gemini-3-flash-preview"
-OCR_TIMEOUT_SECONDS = 120.0                   # genai HTTP 超时（秒）
+# genai HttpOptions.timeout 的单位是毫秒（SDK 内部会除以 1000 换算成秒传给 httpx），
+# 实测误传秒值 120 会在 ~1 秒内触发 read timeout；这里表示 120 秒。
+OCR_TIMEOUT_MS = 120_000
 OCR_PROMPT = "请你将图片处理成markdown文本，根据句号、句点、数字标号将文本分割为句子并换行。如果句子中有被圈出、粗体、放大、与众不同的字体或颜色的文本，则把它们也用粗体标记。请仅输出markdown代码即可。"
 
 # Azure REST（步骤 1 验证结论：requests、timeout=(5, 30)、不自动重试）
@@ -532,7 +534,7 @@ def get_gemini_client():
     """惰性创建 genai 客户端：显式 HTTP 超时、单次尝试不自动重试。"""
     global _gemini_client
     if _gemini_client is None:
-        client_options = {"timeout": OCR_TIMEOUT_SECONDS, "retry_options": {"attempts": 1}}
+        client_options = {"timeout": OCR_TIMEOUT_MS, "retry_options": {"attempts": 1}}
         if GEMINI_API_KEY:
             _gemini_client = genai.Client(
                 api_key=GEMINI_API_KEY,

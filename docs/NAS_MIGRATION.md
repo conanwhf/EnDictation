@@ -335,6 +335,14 @@ docker compose -f compose.nas.yml logs --tail=100
 
 ### 2026-09-25 真实 API 验证（补充，本地提交）
 
+**第二轮（补 Gemini 真实 OCR，用户提供测试密钥）：**
+- 修复真实测试发现的单位缺陷：`genai HttpOptions.timeout` 单位为毫秒（SDK 源码 `get_timeout_in_seconds` 明确除以 1000），原 `timeout=120` 实际只有 0.12 秒，真实调用约 1 秒即 `read timeout`；改为 `OCR_TIMEOUT_MS = 120_000`（120 秒）。修复后 45 项自动化测试仍全部通过。
+- 真实 Gemini OCR（`gemini-3-flash-preview`，用户图片转换副本 5099×3824）：`succeeded`，耗时 27.2s，识别 28 行（标题 "Ex(1) - Words with ea, ai, ay, ou, ow"，27 条非标题句子 + 32 个重点词，日期行与编号句解析正常）。
+- 真实全链路（真实图片 → 真实 OCR → 真实 Azure TTS → 音频下载）：TTS `59/59` 项 100% `succeeded`、无 warnings，耗时 13.1s；整句与重点词 MP3 落盘 `tools/real_api_verification/real_chain_sentence_1.mp3`、`real_chain_word_1_0.mp3`（重点词 "29th September"），**待人工播放确认**。
+- 至此原未验证项仅剩：Google Cloud TTS（无服务账号/ADC 凭据）；amd64 NAS 原生验收；NAS 实机端口/卷权限/资源余量；全部 MP3 的人工听感确认。
+
+**第一轮（仅 Azure 凭据）：**
+
 用真实凭据与用户提供图片 `IMG_9888.jpeg` 补做真实测试；凭据取自用户环境变量（仅 `AZURE_SPEECH_KEY` 与 `AZURE_SPEECH_REGION`，无 Gemini / Google Cloud 凭据；`GOOGLE_PLACES_API_KEY` 属 Places 服务，与 Gemini 无关，未挪用）。
 
 **已验证：**
