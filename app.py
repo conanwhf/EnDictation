@@ -4,15 +4,15 @@
 - /upload 与 /generate-tts 受理后台任务并立即返回 202 与 status_url，不在 HTTP 请求内等待外部 API。
 - 会话隔离：签名 cookie 内保存服务端生成的随机会话 ID，任务按 owner 校验；
   写接口要求有效会话并通过同源检查。
-- 输入上限（请求体大小、图片格式/像素、句子/重点词数量与长度、合成总量、执行预算）
-  在请求入口校验，均为写入代码常量的初始设计值，不提供环境变量配置。
+- 输入校验：TTS 的句子/重点词数量与长度、合成总量、语速与执行预算在请求入口校验
+  （写入代码常量的初始设计值，不提供环境变量配置）；上传图片不做本地内容校验
+  （2026-09-25 用户决策，恢复旧版直接上传，内容由提供方判定）。
 - Azure TTS 采用文本转语音 REST 接口（步骤 1 验证结论见 NAS_MIGRATION §3.5），
   不再依赖 Azure Speech SDK；所有外部调用显式配置有限超时，不自动重试。
 """
 
 import argparse
 import html
-import io
 import json
 import logging
 import math
@@ -25,7 +25,6 @@ from pathlib import Path
 import requests
 from flask import (Flask, abort, jsonify, render_template, request,
                    send_from_directory, session)
-from PIL import Image
 from google import genai
 from google.genai import types as genai_types
 
@@ -54,13 +53,21 @@ except ImportError:
 # ---- 初始设计值常量（NAS_MIGRATION §3.5/§3.6；不提供环境变量配置） ----
 
 DEFAULT_DATA_DIR = ".local-data"
-MAX_REQUEST_BYTES = 10 * 1024 * 1024          # 单次请求体上限，Flask MAX_CONTENT_LENGTH
-MAX_IMAGE_PIXELS = 20_000_000                 # 图片像素数上限
-IMAGE_FORMATS = {                              # Pillow 实际格式 → (扩展名, MIME)
-    "JPEG": (".jpg", "image/jpeg"),
-    "PNG": (".png", "image/png"),
-    "WEBP": (".webp", "image/webp"),
+# 2026-09-25 用户决策：移除上传内容的本地校验（格式白名单、像素上限、请求体上限），
+# 恢复旧版「直接上传」语义：字节原样转发提供方，内容有效性由提供方判定，
+# 失败以 ocr_failed 明确报错。create_app 的 max_content_length 参数保留供部署方自行设置。
+# MIME 按上传声明映射（与旧版写死 image/jpeg 的行为保持兼容），扩展名仅用于存储命名。
+UPLOAD_MIME_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/heic": ".heic",
+    "image/heif": ".heif",
+    "image/gif": ".gif",
+    "image/bmp": ".bmp",
+    "image/tiff": ".tiff",
 }
+DEFAULT_UPLOAD_MIME = "image/jpeg"
 MAX_NON_TITLE_SENTENCES = 50                  # 单次 TTS 非标题句子数上限
 MAX_SENTENCE_CHARS = 500                      # 单句长度上限
 MAX_BOLD_WORDS_PER_SENTENCE = 20              # 每句重点词数量上限
@@ -495,31 +502,17 @@ def validate_tts_request(data):
     return clean_rows, tts_model, speed_percent
 
 
-def validate_and_save_image(file_storage, task_dir):
-    """校验上传图片的实际内容并写入任务目录，返回 (输入文件名, MIME 类型)。
+def save_upload_file(file_storage, task_dir):
+    """保存上传字节到任务目录，返回 (输入文件名, 传递给提供方的 MIME 类型)。
 
-    上传文件名只作为显示信息，不参与目录定位；扩展名由 Pillow 实际格式决定。
+    不做本地内容校验（2026-09-25 用户决策，恢复旧版直接上传）：
+    MIME 按上传声明映射、默认 image/jpeg；内容有效性由提供方判定，
+    无效内容以任务级 ocr_failed 明确报错。上传文件名不参与目录定位。
     """
     raw = file_storage.read()
-    if not raw:
-        raise RequestValidationError(400, "invalid_input", "上传的文件为空")
-    try:
-        with Image.open(io.BytesIO(raw)) as img:
-            img.verify()
-        with Image.open(io.BytesIO(raw)) as img:
-            image_format = img.format
-            width, height = img.size
-    except Exception:
-        raise RequestValidationError(415, "invalid_input", "文件不是有效图片或已损坏")
-
-    if image_format not in IMAGE_FORMATS:
-        raise RequestValidationError(
-            415, "invalid_input", f"图片格式不支持，仅支持 JPEG、PNG、WebP（实际为 {image_format}）")
-    if width * height > MAX_IMAGE_PIXELS:
-        raise RequestValidationError(
-            413, "too_large", f"图片像素数超过上限 {MAX_IMAGE_PIXELS}（实际 {width}x{height}）")
-
-    extension, mime_type = IMAGE_FORMATS[image_format]
+    mime_type = (file_storage.mimetype or "").split(";")[0].strip().lower() \
+        or DEFAULT_UPLOAD_MIME
+    extension = UPLOAD_MIME_EXTENSIONS.get(mime_type, ".bin")
     input_name = f"input{extension}"
     (task_dir / input_name).write_bytes(raw)
     return input_name, mime_type
@@ -871,8 +864,8 @@ def _require_same_origin():
         abort(403)
 
 
-def create_app(task_manager, *, max_content_length=MAX_REQUEST_BYTES):
-    """构建 Flask 应用；测试可注入独立 TaskManager 与更小的请求体上限。"""
+def create_app(task_manager, *, max_content_length=None):
+    """构建 Flask 应用；测试可注入独立 TaskManager 与自定义请求体上限（None 为不限制）。"""
     flask_app = Flask(__name__)
     flask_app.config.update(
         SECRET_KEY=os.environ["SECRET_KEY"],
@@ -927,7 +920,7 @@ def create_app(task_manager, *, max_content_length=MAX_REQUEST_BYTES):
         holder = {}
 
         def input_saver(task_dir):
-            input_name, mime_type = validate_and_save_image(file, task_dir)
+            input_name, mime_type = save_upload_file(file, task_dir)
             holder["mime_type"] = mime_type
             return str(task_dir / input_name)
 
@@ -937,9 +930,7 @@ def create_app(task_manager, *, max_content_length=MAX_REQUEST_BYTES):
         try:
             snapshot = task_manager.submit(
                 stage="ocr", owner=sid, execute=execute, input_saver=input_saver)
-        except RequestValidationError as exc:
-            return _error_response(exc.status, exc.code, exc.message)
-        except CapacityError as exc:  # noqa: F821 - 来自 tasks 模块
+        except CapacityError as exc:
             return _error_response(429, "capacity", str(exc))
         return jsonify({
             "task_id": snapshot["task_id"],

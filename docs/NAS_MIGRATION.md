@@ -165,6 +165,8 @@ TTS 的预期提供方错误与单条调用超时使用同一处理规则：底�
 | 单次合成文本总量 | 句子和重点词累计最多 10000 字符，包含重复合成部分 |
 | 单任务执行预算 | 从实际开始执行起计 10 分钟，不计排队时间；在连续合成调用之间检查 |
 
+> **2026-09-25 变更（用户决策）**：移除上表前三行中与上传图片相关的限制——图片格式白名单、2000 万像素上限与 10 MiB 请求体上限。起因：真实测试中 iPhone 相册原图（MPO 容器、2447 万像素）按原规则被拒，与实际使用习惯冲突。恢复旧版「直接上传」语义：上传字节不做本地内容校验，MIME 按上传声明映射（默认 `image/jpeg`，与旧版写死值一致），内容有效性由提供方判定，无效内容以任务级 `ocr_failed` 明确报错。`Pillow` 从运行依赖移至测试依赖；`create_app(max_content_length=...)` 参数保留，部署方仍可显式设置请求体上限（此时 413 处理继续生效）。§3.4 表中 `/upload` 的 `415` 与像素类 `413` 失败响应随之作废。已实测：MPO 原图 3.5MB 直传 `202` → OCR `succeeded`（10.1s，识别 28 行）。
+
 引擎、语言、音色和速度以现有能力矩阵为准。拒绝无效组合、非有限数值和越界速度，不回退到另一种付费引擎。标题、正文和重点词按实际输出位置转义；进度、错误和提示用 DOM `textContent` 显示。
 
 保留现有 `GOOGLE_API_KEY`、`AZURE_API_KEY`、区域变量及 Google Cloud TTS 凭据别名。凭据只通过进程环境或只读文件挂载传入，日志不打印密钥、图片字节或凭据 JSON。
@@ -334,6 +336,8 @@ docker compose -f compose.nas.yml logs --tail=100
 - **交付结论：项目改造完成，可进入 NAS 部署验证；不能写「NAS 已迁移完成」。** 未验证项：①真实 Azure 合成与语速对比（无 `AZURE_API_KEY`，`tools/verify_azure_rest.py --real` 待补）；②真实图片 OCR 与 Gemini 额度（无 `GOOGLE_API_KEY`）；③gTTS / Google Cloud TTS 真实短文本合成；④真实凭据下的浏览器播放（本轮播放用的是仓库历史 MP3）；⑤amd64 系统库与运行验证为本机 Apple Silicon 模拟，非 NAS 原生（Intel J4025）验收；⑥NAS 实机端口、卷权限与资源余量。首次推送前需确认：本版本已移除 Azure 部署 job（推送将一并携带），且不存在仍会部署的旧 workflow run；本阶段全程未推送。
 
 ### 2026-09-25 真实 API 验证（补充，本地提交）
+
+- 2026-09-25 上传直传变更（用户决策，本地提交）：移除图片格式白名单、2000 万像素上限与 10 MiB 请求体上限（详见 §3.5 变更注记）。`validate_and_save_image` 替换为 `save_upload_file`（不做本地校验，MIME 按上传声明映射默认 `image/jpeg`）；`Pillow` 移至 `requirements-dev.txt`，镜像不再安装。测试调整为直传语义：任意字节 202 受理、无效内容由提供方判定为 `ocr_failed`（44 项通过）。实测：iPhone MPO 原图（3.5MB、2447 万像素）直传 `202` → 真实 OCR `succeeded`（10.1s，识别 28 行、27 句 + 28 词）。
 
 **第二轮（补 Gemini 真实 OCR，用户提供测试密钥）：**
 - 修复真实测试发现的单位缺陷：`genai HttpOptions.timeout` 单位为毫秒（SDK 源码 `get_timeout_in_seconds` 明确除以 1000），原 `timeout=120` 实际只有 0.12 秒，真实调用约 1 秒即 `read timeout`；改为 `OCR_TIMEOUT_MS = 120_000`（120 秒）。修复后 45 项自动化测试仍全部通过。

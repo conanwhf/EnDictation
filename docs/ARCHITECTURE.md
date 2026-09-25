@@ -64,7 +64,7 @@ EnDictation/
 
 ```
 <DATA_DIR>/tasks/<task_id>/     # DATA_DIR 由环境变量指定（容器内 /data）
-  input.jpg|png|webp            # OCR 临时输入（服务端命名，结束后删除）
+  input.<按MIME的扩展名>         # OCR 临时输入（服务端命名，结束后删除）
   sentence_<index>.mp3          # TTS 整句音频
   word_<index>_<index>.mp3       # TTS 重点词音频
 ```
@@ -121,11 +121,10 @@ EnDictation/
 
 ## 输入限制（初始设计值常量）
 
+上传图片**不做本地内容校验**（2026-09-25 用户决策，恢复旧版直接上传）：MIME 按上传声明映射、默认 `image/jpeg`，内容有效性由提供方判定，无效内容以任务级 `ocr_failed` 明确报错。`create_app(max_content_length=...)` 参数保留，部署方显式设置后 413 处理继续生效。
+
 | 项目 | 限制 |
 |------|------|
-| 单次请求体 | 10 MiB（Flask `MAX_CONTENT_LENGTH`，超限 413 `too_large`） |
-| 图片格式 | JPEG/PNG/WebP，按 Pillow 实际内容校验；不支持 415 |
-| 图片像素数 | 2000 万像素，超限 413 `too_large` |
 | 非标题句子数 | ≤ 50 条 |
 | 单句长度 | ≤ 500 字符 |
 | 每句重点词 | ≤ 20 个，每个 ≤ 100 字符 |

@@ -130,30 +130,32 @@ def test_upload_missing_file(client):
 
 # ---- 输入校验 ----
 
-def test_upload_rejects_non_image(client):
+def test_upload_accepts_any_content_without_local_validation(client, monkeypatch):
+    """2026-09-25 用户决策：不做本地内容校验，任意字节直接受理，内容由提供方判定。"""
+    monkeypatch.setattr(app_module, "extract_text_cloud", fake_extract)
     establish_session(client)
-    resp = submit_upload(client, png_bytes=b"this is not an image at all",
-                         filename="fake.png")
-    assert resp.status_code == 415
-    assert resp.get_json()["error"]["code"] == "invalid_input"
+    resp = submit_upload(client,
+                         png_bytes=b"\xff\xd8\xff\xe0MPO/JPEG-ish bytes",
+                         filename="IMG_9888.jpeg")
+    assert resp.status_code == 202
+    done = wait_task(client, resp.get_json()["task_id"])
+    assert done["status"] == "succeeded"
 
 
-def test_upload_rejects_unsupported_format(client):
+def test_upload_invalid_content_fails_via_provider(client, monkeypatch):
+    """无效内容由提供方判定失败，任务级明确报错 ocr_failed。"""
+    def reject_payload(image_path, mime_type):
+        raise RuntimeError("Invalid image payload")
+
+    monkeypatch.setattr(app_module, "extract_text_cloud", reject_payload)
     establish_session(client)
-    img = Image.new("RGB", (10, 10))
-    buf = io.BytesIO()
-    img.save(buf, format="BMP")
-    resp = submit_upload(client, png_bytes=buf.getvalue(), filename="list.bmp")
-    assert resp.status_code == 415
-    assert "BMP" in resp.get_json()["error"]["message"]
-
-
-def test_upload_rejects_pixel_overflow(client, monkeypatch):
-    establish_session(client)
-    monkeypatch.setattr(app_module, "MAX_IMAGE_PIXELS", 50)
-    resp = submit_upload(client, png_bytes=make_png(10, 10))
-    assert resp.status_code == 413
-    assert resp.get_json()["error"]["code"] == "too_large"
+    resp = submit_upload(client, png_bytes=b"definitely not an image",
+                         filename="note.txt")
+    assert resp.status_code == 202
+    done = wait_task(client, resp.get_json()["task_id"])
+    assert done["status"] == "failed"
+    assert done["error"]["code"] == "ocr_failed"
+    assert "Invalid image payload" in done["error"]["message"]
 
 
 def test_request_body_too_large(manager):
