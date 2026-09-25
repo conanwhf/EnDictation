@@ -333,6 +333,21 @@ docker compose -f compose.nas.yml logs --tail=100
   - 浏览器端到端验证（Chrome headless + agent-browser，假 OCR/假 TTS 拷贝真实 MP3，不消耗额度）：首轮发现真实回归——OCR 成功后 `currentOcrData` 未赋值，「生成TTS」必然提前返回；已修复（`handleTaskUpdate` 在 `stage==='ocr'` 成功时保存 `task.result`）。复验通过：上传→OCR 渲染（加粗、无裸露 `**`、无播放按钮）→生成TTS（实际发出 POST、202 后轮询）→整句播放按钮与重点词胶囊→真实播放（currentTime 前进、onended 移除元素、无错误提示）→无 warnings。
 - **交付结论：项目改造完成，可进入 NAS 部署验证；不能写「NAS 已迁移完成」。** 未验证项：①真实 Azure 合成与语速对比（无 `AZURE_API_KEY`，`tools/verify_azure_rest.py --real` 待补）；②真实图片 OCR 与 Gemini 额度（无 `GOOGLE_API_KEY`）；③gTTS / Google Cloud TTS 真实短文本合成；④真实凭据下的浏览器播放（本轮播放用的是仓库历史 MP3）；⑤amd64 系统库与运行验证为本机 Apple Silicon 模拟，非 NAS 原生（Intel J4025）验收；⑥NAS 实机端口、卷权限与资源余量。首次推送前需确认：本版本已移除 Azure 部署 job（推送将一并携带），且不存在仍会部署的旧 workflow run；本阶段全程未推送。
 
+### 2026-09-25 真实 API 验证（补充，本地提交）
+
+用真实凭据与用户提供图片 `IMG_9888.jpeg` 补做真实测试；凭据取自用户环境变量（仅 `AZURE_SPEECH_KEY` 与 `AZURE_SPEECH_REGION`，无 Gemini / Google Cloud 凭据；`GOOGLE_PLACES_API_KEY` 属 Places 服务，与 Gemini 无关，未挪用）。
+
+**已验证：**
+- Azure REST 真实合成（`tools/verify_azure_rest.py --real`，7/7 通过）：默认语速 -15% 与调整语速 0% 各一条，24192 / 22752 字节，耗时 0.80s / 0.30s；同轮复验受控故障 6 项仍全部通过。MP3 已落盘 `tools/azure_rest_verify_output/`，**待人工播放确认**。
+- 应用链路真实 Azure TTS 端到端（`python app.py` + curl，真实密钥）：会话 → `/generate-tts` 202 → 排队/执行 → `4/4` 项 100% `succeeded`、无 warnings → 经 `/audio/<task_id>/` 下载整句与重点词 MP3，帧头 `FF F3` 有效。文件在 `tools/real_api_verification/`（`app_e2e_sentence_1.mp3`、`app_e2e_word_1_0.mp3`）。
+- gTTS 真实合成：30720 字节，`gtts_sample.mp3`，**待人工播放确认**。
+- 真实图片入口校验：iPhone 原图（MPO 容器、5712×4284=2447 万像素）按设计被拒——`415 实际为 MPO`（白名单外）；转基线 JPEG 并缩至 5099×3824（1949 万像素、2.5MB）后 `202` 受理。
+- 无凭据失败路径：受理后的 OCR 任务明确 `failed` + `ocr_failed`（"No API key was provided..."），符合「真实任务明确报错」验收项。
+
+**仍未验证：** 真实 Gemini OCR 与额度（无密钥）；Google Cloud TTS（无服务账号/ADC）；真实听写内容的 OCR→TTS 全链路（依赖前者）；MP3 实际听感（文件已生成，待人工播放）；amd64 NAS 原生验收；NAS 实机端口/卷权限/资源余量。
+
+**产品观察（待用户决策）：** iPhone 相册原图常见为 MPO 多图容器且超过 2000 万像素，当前设计会直接拒绝（格式白名单与像素上限均为计划既定值）。本轮通过「转基线 JPEG + 缩放」完成测试；是否在服务端自动接受 MPO/超限缩图，属于新的产品决策，未擅自改动。
+
 项目改造交付时应报告：实际修改文件、自动化结果、本地容器结果、真实 API/浏览器结果、未验证项。若只完成本地验证，应写「可进入 NAS 部署验证」，不能写「NAS 已迁移完成」。
 
 后续 NAS 部署需单独确认端口、卷权限、资源余量和镜像获取方式；公网工作另起阶段。OCR 模型可用性、云服务免费额度和账号账单配置也需使用现有账号核实。本阶段不承诺无限免费，不更换模型来掩盖调用失败。
