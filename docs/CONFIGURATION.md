@@ -84,18 +84,29 @@
 
 ### Docker / NAS 更新
 
-1. 更新前在内网导出已保存配置并妥善保管。等待正在执行或排队的任务结束；重启不能续跑任务。
-2. 保持原 Compose 项目名、服务名和 `endictation-data` 卷引用不变。Compose 的实际卷名带项目名前缀，更换目录、`-p` 参数或 Container Station Application 名称可能连接到另一个空卷，看起来像配置丢失。
-3. 在已部署的同一项目目录更新代码后执行：
+容器每次启动（包括 Restart、宿主机重启后的自动启动）都会由镜像中的 `docker_start.py` 拉取公开仓库 `https://github.com/conanwhf/EnDictation.git` 的 `main` 分支，然后启动 Gunicorn。运行中不定时拉取，不添加网页更新按钮，不需要在 NAS 上执行 Git 命令，也不需要 Git Token。本地 `python app.py` 和 `startup.sh` 不自动更新代码。
 
-```bash
-docker compose -f compose.nas.yml up -d --build endictation
-docker compose -f compose.nas.yml ps
-```
+首次采用此功能，必须先安装包含新启动程序的镜像；旧容器单纯 Restart 不会获得该能力。镜像 `conanwhf1984/endictation-nas:latest` 由手动工作流 `Publish NAS image` 发布；首次发布和 Container Station 操作见 [NAS 部署与更新](NAS_DEPLOYMENT.md)。
 
-容器被替换，但原卷继续挂载到 `/app/.local-data`。不需要先 `down`，禁止为普通更新使用 `down -v`、删除卷或重新初始化运行目录。若采用预构建镜像，则先拉取目标版本，再在同一 Application 中重建服务并保留原卷。
+日常代码更新步骤：
 
-4. 更新后从受信直连入口确认配置仍在，再验证服务功能；`/health` 正常不能证明密钥有效。
+1. 在开发端测试并推送代码到 GitHub `main`，确认 CI 成功。未推送的本地提交不会被 NAS 拉取；启动程序不查询 CI 状态，也不替代发布前测试。
+2. 更新前在内网导出已保存配置并妥善保管。等待正在执行或排队的任务结束；重启不能续跑任务。
+3. 在 Container Station 对本应用执行 **Restart**。容器首次把代码克隆到 `/app/.local-data/source`，之后执行 fetch 和 fast-forward 更新，不强制覆盖本地修改或分叉历史。
+4. 查看容器日志中的 `Source ready: <commit>`，确认启动版本，再验证页面与服务功能。`/health` 正常只证明进程可响应，不能证明更新成功或密钥有效。
+
+缓存代码中的 `.local-data` 链接到原数据卷。Git 更新不写入实际 `config.json`、`.session-key` 或任务目录；远端若跟踪 `.local-data`，会拒绝该更新。
+
+失败与镜像更新：
+
+- 每条 Git 命令最多等待 60 秒，超时终止 Git 及其传输子进程。网络失败等原因会记录 `Source update skipped`，优先运行与镜像兼容且无已跟踪文件修改的缓存代码；没有可用缓存时运行镜像内代码。不把回退启动记作更新成功。
+- 远端 `requirements.txt`、`Dockerfile`、`docker_start.py` 必须与镜像内对应文件内容一致；否则记录 `Image update required`，不应用新代码。原因是新代码可能依赖旧镜像中不存在的包、系统库或启动行为，Git 提交顺序与开发机测试无法证明旧镜像具备这些依赖。这里只比较原文件，不增加 hash、版本清单或冻结合同。
+- 上述文件发生变化时，需先构建并发布新镜像，再在 Container Station 执行 **Images → Pull → Update Application**。Restart 不会更新镜像。替换镜像后，再次启动会检查远端代码与新镜像的兼容性；旧缓存不兼容时不运行它。
+- 应用代码本身或已有配置不兼容造成的启动失败会直接报错，不自动回滚、不覆盖配置。保存日志后处理；连续 Restart 不能修复代码错误。
+
+NAS 的 `compose.qnap.yml` 使用固定 external volume `endictation-data`；必须复用这个实际卷名，不因重建而创建空卷替代。开发端 `compose.nas.yml` 的实际卷名带项目名前缀，更换目录或 `-p` 参数可能连接到另一个空卷。禁止为普通更新使用 `down -v`、删除卷或重新初始化运行目录。
+
+开发端构建和验证镜像仍可使用 `docker compose -f compose.nas.yml up -d --build endictation`；这不是 NAS 日常更新的操作要求。Compose、端口或卷映射变化仍须在 Container Station 更新应用配置。
 
 默认文件的新增语言或模型只影响首次安装，不自动改写已有实例。需要采用新版选项时，在现有配置上手动增补对应字段；不要为更新语言而直接导入空密钥默认文件覆盖实际配置。
 

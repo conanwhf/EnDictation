@@ -1,0 +1,29 @@
+# Container Station -> Applications -> Create/Update -> YAML.
+# Create the external volume "endictation-data" before the first deployment.
+# LAN-only deployment; no public ingress or host-side source checkout.
+services:
+  endictation:
+    image: docker.io/conanwhf1984/endictation-nas:latest
+    platform: linux/amd64
+    container_name: endictation
+    restart: unless-stopped
+    ports:
+      - "192.168.0.128:15901:5001"
+    volumes:
+      - endictation-data:/app/.local-data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health', timeout=5)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  endictation-data:
+    external: true
+    name: endictation-data

@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node for frontend regression tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Create virtual environment
         run: |
           python -m venv venv
@@ -35,4 +40,4 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Run syntax check
-        run: python -m py_compile app.py tasks.py
+        run: python -m py_compile app.py tasks.py config.py docker_start.py

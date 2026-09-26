@@ -14,7 +14,7 @@ docs/
 tools/
 README.md
 compose.nas.yml
-Dockerfile
+compose.qnap.yml
 startup.sh
 web.config
 azure.yaml

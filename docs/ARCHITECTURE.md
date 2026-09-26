@@ -178,12 +178,15 @@ Azure REST 路径的受控故障验证结论（连接拒绝、连接建立超时
 
 ### 容器（compose.nas.yml）
 
+此文件用于本机验证；QNAP 使用固定 external volume 与 LAN 地址绑定的 `compose.qnap.yml`，具体参数与 GUI 操作见 [NAS 部署文档](NAS_DEPLOYMENT.md)。镜像通过手动工作流 `Publish NAS image` 发布到现有 Docker Hub 账号，普通推送不操作 NAS 或 Azure。
+
 ```bash
 docker compose -f compose.nas.yml up -d
 ```
 
 - 镜像 `linux/amd64`、Debian `python:3.11-slim`、非 root 运行；空 named volume 首挂载继承 `/app/.local-data/tasks` 属主。
 - 端口仅绑定 `127.0.0.1:15901:5001`；`restart: unless-stopped`（重启意味着未完成任务丢失，不表示续跑）。
+- 镜像中的 `docker_start.py` 在容器启动时拉取 GitHub `main`，缓存位于数据卷的 `source/`；仅允许 fast-forward 更新，实际配置保持在原数据卷中。依赖、Dockerfile 或启动程序与镜像不一致时拒绝更新代码，提示更新镜像；拉取失败明确记录日志，使用兼容缓存或镜像内代码。详见 [更新与配置保留](CONFIGURATION.md#更新与配置保留)。
 - 本阶段不设 CPU/内存硬限制（本机空转实测约 99MiB / 0.12% CPU，供 NAS 部署值参考）。
 
 ### 本地运行

@@ -46,6 +46,10 @@ python app.py                            # 仅监听 http://127.0.0.1:5001，端
 
 ## 容器运行（NAS 迁移版）
 
+NAS 手动部署使用 [NAS 部署与更新文档](docs/NAS_DEPLOYMENT.md) 和 [compose.qnap.yml](compose.qnap.yml)：在 Container Station 拉取 `conanwhf1984/endictation-nas:latest`，创建 external volume，再粘贴 YAML。无需在 NAS 手动拉代码或构建。
+
+以下 `compose.nas.yml` 仅供开发端本机构建与回环端口验证，不要直接粘贴到 QNAP：
+
 ```bash
 docker compose -f compose.nas.yml config --quiet
 docker compose -f compose.nas.yml up -d
@@ -54,7 +58,9 @@ docker compose -f compose.nas.yml ps               # 仅应显示 127.0.0.1:1590
 
 - 镜像为 `linux/amd64`，单服务 + 独立数据卷；健康检查用 Python 标准库请求 `/health`。
 - 数据卷挂载到 `/app/.local-data`。从旧 `/data` 挂载更新时沿用同一个 named volume 即可；旧环境变量不会自动迁入配置文件，需在页面重新配置。
-- 项目更新不会覆盖实际配置：在原 Compose 项目中执行 `docker compose -f compose.nas.yml up -d --build endictation`，保留原卷，不使用 `down -v`。新版默认配置只用于未保存配置的实例，详见 [更新与配置保留](docs/CONFIGURATION.md#更新与配置保留)。
+- 首次安装含新启动程序的镜像后，日常代码更新只需在 Container Station 点击 Restart：启动时自动拉取 GitHub `main`，不需要在 NAS 上手动执行 Git 命令，不添加网页更新按钮。代码须先在开发端测试并推送；本地开发启动不自动拉取。
+- 拉取失败会明确记录日志并使用兼容的缓存代码或镜像内代码。依赖、Dockerfile 或容器启动程序变化时，手动运行 GitHub Actions 的 `Publish NAS image`，成功后在 Container Station 执行 Pull + Update Application；Restart 不更新镜像。
+- 项目更新不会覆盖实际配置：保留原 Compose 项目和数据卷，不使用 `down -v`。新版默认配置只用于未保存配置的实例，具体流程与失败处理见 [更新与配置保留](docs/CONFIGURATION.md#更新与配置保留)。
 - 端口只绑定回环地址 `127.0.0.1:15901`；NAS 上的实际端口与 LAN 绑定在部署阶段另行确认。
 - 任务状态与音频只在内存和容器卷中保留：进程重启后旧任务一律失效（返回 404，提示重新提交），启动时会清理遗留任务目录。
 - 容器验证详情与后续 NAS 部署边界见 [NAS 迁移计划](docs/NAS_MIGRATION.md)。
@@ -91,7 +97,7 @@ python -m pytest tests/ -q
 
 ## Azure App Service
 
-NAS 迁移进行中，项目改造计划见 [NAS 迁移计划](docs/NAS_MIGRATION.md)。迁移期间 GitHub Actions 仅执行构建/测试，不再部署 Azure；现有 Azure 网页保持已部署版本，不随 `main` 推送更新，停用时另行确认。
+NAS 迁移进行中，项目改造历史见 [NAS 迁移计划](docs/NAS_MIGRATION.md)，当前部署操作见 [NAS 部署与更新](docs/NAS_DEPLOYMENT.md)。普通 `main` 推送只运行构建/测试，镜像工作流单独手动触发，不再部署 Azure；现有 Azure 网页保持已部署版本，停用时另行确认。
 
 ## 目录结构
 
@@ -109,5 +115,7 @@ requirements.txt    # 运行依赖
 requirements-dev.txt# 测试依赖（pytest）
 Dockerfile          # NAS 容器镜像（python:3.11-slim，非 root）
 compose.nas.yml     # 单服务编排（amd64、回环端口绑定、标准库 healthcheck）
+compose.qnap.yml    # QNAP GUI 部署（Docker Hub 镜像、LAN 绑定、external volume）
 startup.sh          # 带检查的 Gunicorn 启动脚本
+docker_start.py     # 容器启动时拉取代码，再启动 Gunicorn
 ```

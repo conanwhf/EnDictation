@@ -1,12 +1,16 @@
 # NAS 迁移计划：项目改造阶段
 
+> 当前部署入口：[NAS 部署与更新](NAS_DEPLOYMENT.md) 与根目录 `compose.qnap.yml`。项目改造已经完成，NAS 尚待手动部署；下文旧步骤与验收记录保留为历史，不按历史参数部署。镜像发布通过手动工作流 `Publish NAS image` 完成，普通推送不部署 NAS 或 Azure。
+
+> 2026-09-26 启动更新修订：容器启动时自动拉取 GitHub `main`，日常代码更新在 Container Station 点击 Restart，不添加网页更新按钮。依赖、Dockerfile、`docker_start.py` 变化仍需 Pull 新镜像并 Update Application；实际配置与代码缓存复用原数据卷。此说明替代旧计划中不包含 Git 拉取的范围约束，操作与失败处理见 [更新与配置保留](CONFIGURATION.md#更新与配置保留)。
+
 > 更新约束：代码、镜像与默认配置可以替换，实际 `.local-data/config.json` 和 `.session-key` 不覆盖、不自动合并。容器更新必须复用原 Compose 项目及数据卷；具体操作见 [更新与配置保留](CONFIGURATION.md#更新与配置保留)。
 
 > 2026-09-26 修订：配置读写和导出限制为本机、家庭 LAN / Tailscale 直连，拒绝 Cloudflare 和转发头，外部页面隐藏入口。无密钥默认配置独立为可提交 Git 的 `config.default.json`，实际密钥仍仅保存在忽略的运行目录。此规则替代下方 2026-09-25「任何访问者可配置」的临时边界；具体允许网段与代理限制见 [配置说明](CONFIGURATION.md#安全边界)。本轮不部署公网。
 
 > 2026-09-25 配置方式修订：以下迁移计划中的环境变量、`SECRET_KEY` 必填和 `/data` 挂载说明已被 [配置说明](CONFIGURATION.md) 与当前 README 替代，原文保留作历史计划记录。当前服务配置由页面「配置」导入/导出 JSON，持久化在 `.local-data/config.json`；签名密钥由本机生成，数据卷挂载 `/app/.local-data`。不再兼容环境变量或 Google ADC。速度与已选性别不进入配置，音色候选映射仍由配置定义。未做管理员身份鉴别，不可开放公网。旧任务迟到的成功或错误响应不得干扰新任务轮询。
 
-> 状态：待实施。本文记录计划，不表示代码已修改或 NAS 已部署。
+> 原始计划状态：编写时待实施；当前进度以上方部署入口和文末验证记录为准，不表示 NAS 已部署。
 > 本阶段仅准备项目代码、测试和容器运行方式；不配置公网入口，不操作 NAS 生产服务。
 
 ## 1. 目标与范围
