@@ -19,43 +19,42 @@
 - **OCR**: Google Gemini 多模态模型（`gemini-3-flash-preview`）
 - **TTS**: Microsoft Azure 文本转语音 REST 接口 + Google TTS (gTTS) + Google Cloud Text-to-Speech
 
-## 环境变量配置
+## 配置文件
 
-| 变量 | 必需 | 说明 |
-|------|------|------|
-| `SECRET_KEY` | 是 | Flask 会话签名密钥；缺失时应用启动直接失败，没有回退默认值 |
-| `GOOGLE_API_KEY` | OCR 必需 | Gemini API 密钥，兼容别名 `GEMINI_API_KEY` |
-| `AZURE_API_KEY` | 使用 Azure 音色必需 | Azure Speech 密钥，兼容别名 `AZURE_SPEECH_KEY`、`SPEECH_KEY` |
-| `AZURE_SPEECH_REGION` | 否 | Azure 区域，默认 `southeastasia`，兼容别名 `AZURE_SERVICE_REGION` |
-| `DATA_DIR` | 否 | 运行数据根目录，默认 `.local-data`，任务文件在 `DATA_DIR/tasks/<task_id>/` |
-| `PORT` | 否 | 服务端口，默认 5001 |
-| `GOOGLE_CLOUD_TTS_CREDENTIALS_JSON` | 否 | Google Cloud TTS 服务账号 JSON 单行字符串（容器推荐） |
-| `GOOGLE_APPLICATION_CREDENTIALS` | 否 | Google Cloud TTS 服务账号文件路径（本地可用） |
+首页「配置」按钮以表单编辑各服务密钥和 OCR 模型，按引擎增删语言、设置音色，并支持导入和导出完整 JSON 文件。Google Cloud 服务账号可单独导入；微软区域不在页面展示，原有区域值保留供 API 调用。首次启动不需要密钥；缺少凭据时对应任务明确失败，不读取环境变量或 Google 默认凭据。
 
-Google Cloud TTS JSON 兼容别名 `GOOGLE_CREDENTIALS_JSON`、`GOOGLE_SERVICE_ACCOUNT_JSON`、`GCP_SERVICE_ACCOUNT_JSON`；文件路径兼容 `GOOGLE_CLOUD_TTS_CREDENTIALS_FILE`、`GOOGLE_SERVICE_ACCOUNT_FILE`、`GCP_SERVICE_ACCOUNT_FILE`。
+- 导入文件后点击「保存并应用」才会生效；导出的是编辑器当前内容，包括尚未保存的修改。
+- Google Cloud 的「导入服务账号」接收原始服务账号 JSON，并将其嵌入完整配置，不依赖外部文件路径。
+- 配置保存在项目根目录 `.local-data/config.json`，文件权限为 `0600`，不进入 Git 或镜像。保存后即时生效，重启后保留。
+- `config.default.json` 是可提交 Git、可进入镜像的默认配置，密钥和服务账号均为空。没有本机配置时才加载它；页面保存不会修改默认文件。
+- 速度和男/女声选择仅由终端用户在页面设置，不进入配置文件。音色定义中的男/女映射用于提供可选项，不代表用户选择或默认偏好。
+- 每种语言旁的「设为首选」单选框可指定全局首选引擎及语言，保存后即时应用，并用于之后打开的页面；初始为 Azure · 新加坡英语。
+- 已受理任务沿用提交时的配置，新任务使用新配置；保存不刷新页面、不清空 OCR 结果。
+- 会话签名密钥自动生成到 `.local-data/.session-key`，不导入导出；保护参数（超时、任务容量、输入上限）仍为代码常量。
+
+**配置仅允许本机、家庭 LAN `192.168.0.0/24` 或 Tailscale `100.64.0.0/10` 直连访问。** 外部页面隐藏配置入口，配置读取、导入和导出均受服务端保护；Cloudflare 或带转发头的请求一律拒绝。不鉴别内网用户身份，公网部署仍需单独验收代理拓扑。配置格式和新增 gTTS 语言示例见 [配置说明](docs/CONFIGURATION.md)。
 
 ## 本地运行
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export SECRET_KEY="某个随机长字符串"      # 必需
-export GOOGLE_API_KEY="您的Gemini API密钥"  # OCR 需要
-python app.py                            # 开发入口，默认 http://localhost:5001
+python app.py                            # 仅监听 http://127.0.0.1:5001，端口用 --port 指定
 # 或生产方式启动（带配置与目录权限检查）：
-./startup.sh
+./startup.sh                             # 可传端口：./startup.sh 5002
 ```
 
 ## 容器运行（NAS 迁移版）
 
 ```bash
-export SECRET_KEY="某个随机长字符串"
-docker compose -f compose.nas.yml config --quiet   # 缺 SECRET_KEY 时直接失败
+docker compose -f compose.nas.yml config --quiet
 docker compose -f compose.nas.yml up -d
 docker compose -f compose.nas.yml ps               # 仅应显示 127.0.0.1:15901->5001
 ```
 
 - 镜像为 `linux/amd64`，单服务 + 独立数据卷；健康检查用 Python 标准库请求 `/health`。
+- 数据卷挂载到 `/app/.local-data`。从旧 `/data` 挂载更新时沿用同一个 named volume 即可；旧环境变量不会自动迁入配置文件，需在页面重新配置。
+- 项目更新不会覆盖实际配置：在原 Compose 项目中执行 `docker compose -f compose.nas.yml up -d --build endictation`，保留原卷，不使用 `down -v`。新版默认配置只用于未保存配置的实例，详见 [更新与配置保留](docs/CONFIGURATION.md#更新与配置保留)。
 - 端口只绑定回环地址 `127.0.0.1:15901`；NAS 上的实际端口与 LAN 绑定在部署阶段另行确认。
 - 任务状态与音频只在内存和容器卷中保留：进程重启后旧任务一律失效（返回 404，提示重新提交），启动时会清理遗留任务目录。
 - 容器验证详情与后续 NAS 部署边界见 [NAS 迁移计划](docs/NAS_MIGRATION.md)。
@@ -88,7 +87,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 python -m pytest tests/ -q
 ```
 
-测试默认用假实现替换所有外部 API，不消耗额度。
+测试默认用假实现替换所有外部 API，不消耗额度。前端轮询竞态测试通过 Node.js 执行，未安装 Node.js 时该项会明确跳过；也可单独运行 `node --test tests/frontend.test.cjs`。
 
 ## Azure App Service
 
@@ -98,9 +97,13 @@ NAS 迁移进行中，项目改造计划见 [NAS 迁移计划](docs/NAS_MIGRATIO
 
 ```text
 app.py              # Flask 应用：路由、校验、OCR/TTS 执行
+config.py           # 默认服务定义、配置校验与原子保存
+config.default.json # 无密钥默认配置，可提交 Git
 tasks.py            # 进程内任务模型：串行 FIFO、容量、owner 校验、过期清理
 templates/
   index.html        # 前端单页面（轮询任务状态、DOM 渲染）
+static/
+  config-editor.js  # 独立配置表单，不阻断上传事件绑定
 tests/              # 任务模型与接口测试（外部 API 为假实现）
 requirements.txt    # 运行依赖
 requirements-dev.txt# 测试依赖（pytest）

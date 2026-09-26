@@ -79,7 +79,7 @@ def submit_tts(client, sentences, engine="azure", language="sg-en",
 SAMPLE_MARKDOWN = "Unit 1\nShe has a **beautiful** garden.\nHe runs **quickly**."
 
 
-def fake_extract(image_path, mime_type):
+def fake_extract(image_path, mime_type, runtime_config):
     return app_module.parse_ocr_response(SAMPLE_MARKDOWN)
 
 
@@ -144,7 +144,7 @@ def test_upload_accepts_any_content_without_local_validation(client, monkeypatch
 
 def test_upload_invalid_content_fails_via_provider(client, monkeypatch):
     """无效内容由提供方判定失败，任务级明确报错 ocr_failed。"""
-    def reject_payload(image_path, mime_type):
+    def reject_payload(image_path, mime_type, runtime_config):
         raise RuntimeError("Invalid image payload")
 
     monkeypatch.setattr(app_module, "extract_text_cloud", reject_payload)
@@ -280,7 +280,7 @@ def manager_owner(manager, task_id):
 
 
 def test_upload_ocr_failure_marks_ocr_failed(client, monkeypatch):
-    def boom(image_path, mime_type):
+    def boom(image_path, mime_type, runtime_config):
         raise RuntimeError("quota exceeded")
 
     monkeypatch.setattr(app_module, "extract_text_cloud", boom)
@@ -489,7 +489,14 @@ def test_restart_invalidates_old_tasks(tmp_path, monkeypatch):
     manager_two.close()
 
 
-def test_bootstrap_requires_secret_key(tmp_path, monkeypatch):
-    monkeypatch.delenv("SECRET_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="SECRET_KEY"):
-        app_module.bootstrap_runtime(str(tmp_path))
+def test_session_key_persisted_without_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("SECRET_KEY", "ignored-environment-key")
+    manager = app_module.bootstrap_runtime(tmp_path)
+    try:
+        first = app_module.create_app(manager)
+        second = app_module.create_app(manager)
+        assert first.secret_key == second.secret_key
+        assert len(first.secret_key) == 32
+        assert (tmp_path / ".session-key").stat().st_mode & 0o777 == 0o600
+    finally:
+        manager.close()

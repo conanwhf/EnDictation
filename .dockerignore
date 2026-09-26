@@ -23,6 +23,9 @@ uploads/
 audio/
 .local-data/
 data/
+endictation-config.json
+.playwright-cli/
+output/
 *.mp3
 *.jpg
 *.jpeg

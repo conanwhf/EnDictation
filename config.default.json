@@ -1,0 +1,249 @@
+{
+  "version": 1,
+  "preferred_tts": {"engine": "azure", "language": "sg-en"},
+  "secrets": {
+    "google_api_key": null,
+    "azure_speech_key": null,
+    "azure_speech_region": "southeastasia",
+    "google_cloud_tts_credentials_json": null
+  },
+  "ocr_model": "gemini-3-flash-preview",
+  "tts_engines": [
+    {
+      "id": "azure",
+      "label": "Azure"
+    },
+    {
+      "id": "google",
+      "label": "Google"
+    },
+    {
+      "id": "gtts",
+      "label": "gTTS"
+    }
+  ],
+  "tts_languages": [
+    {
+      "id": "uk-en",
+      "label": "英式英语"
+    },
+    {
+      "id": "us-en",
+      "label": "美式英语"
+    },
+    {
+      "id": "sg-en",
+      "label": "新加坡英语"
+    },
+    {
+      "id": "cmn-cn",
+      "label": "中文"
+    },
+    {
+      "id": "fr-fr",
+      "label": "法语"
+    }
+  ],
+  "tts_models": {
+    "SG-man": {
+      "label": "新加坡英语-男声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "en-SG-WayneNeural"
+    },
+    "SG-woman": {
+      "label": "新加坡英语-女声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "en-SG-LunaNeural"
+    },
+    "UK-man": {
+      "label": "英式英语/中文-男声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "en-GB-OllieMultilingualNeural"
+    },
+    "UK-woman": {
+      "label": "英式英语/中文-女声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "en-GB-LibbyNeural"
+    },
+    "US-Azure-man": {
+      "label": "美式英语-男声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "en-US-GuyNeural"
+    },
+    "US-Azure-woman": {
+      "label": "美式英语-女声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "en-US-JennyNeural"
+    },
+    "CH-man": {
+      "label": "中文-男声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "zh-CN-YunyangNeural"
+    },
+    "CH-woman": {
+      "label": "中文-女声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "zh-CN-XiaoxiaoNeural"
+    },
+    "French-Azure-man": {
+      "label": "法语-男声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "fr-FR-HenriNeural"
+    },
+    "French-Azure-woman": {
+      "label": "法语-女声 (Microsoft)",
+      "type": "ms-tts",
+      "voice_name": "fr-FR-DeniseNeural"
+    },
+    "UK-Google": {
+      "label": "英式英语 (Google)",
+      "type": "gtts",
+      "lang": "en",
+      "tld": "co.uk"
+    },
+    "US-Google": {
+      "label": "美式英语 (Google)",
+      "type": "gtts",
+      "lang": "en",
+      "tld": "com"
+    },
+    "French-Google": {
+      "label": "法语 (Google)",
+      "type": "gtts",
+      "lang": "fr",
+      "tld": "fr"
+    },
+    "Chinese-Google": {
+      "label": "中文 (Google)",
+      "type": "gtts",
+      "lang": "zh",
+      "tld": "com"
+    },
+    "English-Chirp": {
+      "label": "英语 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "en-GB",
+      "voice_name": "en-GB-Chirp3-HD-Leda"
+    },
+    "UK-Chirp-man": {
+      "label": "英式英语-男声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "en-GB",
+      "voice_name": "en-GB-Chirp3-HD-Charon"
+    },
+    "UK-Chirp-woman": {
+      "label": "英式英语-女声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "en-GB",
+      "voice_name": "en-GB-Chirp3-HD-Leda"
+    },
+    "US-Chirp-man": {
+      "label": "美式英语-男声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "en-US",
+      "voice_name": "en-US-Chirp3-HD-Charon"
+    },
+    "US-Chirp-woman": {
+      "label": "美式英语-女声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "en-US",
+      "voice_name": "en-US-Chirp3-HD-Leda"
+    },
+    "Chinese-Chirp": {
+      "label": "中文 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "cmn-CN",
+      "voice_name": "cmn-CN-Chirp3-HD-Leda"
+    },
+    "Chinese-Chirp-man": {
+      "label": "中文普通话-男声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "cmn-CN",
+      "voice_name": "cmn-CN-Chirp3-HD-Charon"
+    },
+    "Chinese-Chirp-woman": {
+      "label": "中文普通话-女声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "cmn-CN",
+      "voice_name": "cmn-CN-Chirp3-HD-Leda"
+    },
+    "French-Chirp": {
+      "label": "法语 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "fr-FR",
+      "voice_name": "fr-FR-Chirp3-HD-Leda"
+    },
+    "French-Chirp-man": {
+      "label": "法语-男声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "fr-FR",
+      "voice_name": "fr-FR-Chirp3-HD-Charon"
+    },
+    "French-Chirp-woman": {
+      "label": "法语-女声 (Google Cloud Chirp 3 HD)",
+      "type": "google-cloud-tts",
+      "language_code": "fr-FR",
+      "voice_name": "fr-FR-Chirp3-HD-Leda"
+    }
+  },
+  "tts_voice_matrix": {
+    "azure": {
+      "uk-en": {
+        "male": "UK-man",
+        "female": "UK-woman"
+      },
+      "us-en": {
+        "male": "US-Azure-man",
+        "female": "US-Azure-woman"
+      },
+      "sg-en": {
+        "male": "SG-man",
+        "female": "SG-woman"
+      },
+      "cmn-cn": {
+        "male": "CH-man",
+        "female": "CH-woman"
+      },
+      "fr-fr": {
+        "male": "French-Azure-man",
+        "female": "French-Azure-woman"
+      }
+    },
+    "google": {
+      "uk-en": {
+        "male": "UK-Chirp-man",
+        "female": "UK-Chirp-woman"
+      },
+      "us-en": {
+        "male": "US-Chirp-man",
+        "female": "US-Chirp-woman"
+      },
+      "cmn-cn": {
+        "male": "Chinese-Chirp-man",
+        "female": "Chinese-Chirp-woman"
+      },
+      "fr-fr": {
+        "male": "French-Chirp-man",
+        "female": "French-Chirp-woman"
+      }
+    },
+    "gtts": {
+      "uk-en": {
+        "male": "UK-Google",
+        "female": "UK-Google"
+      },
+      "us-en": {
+        "male": "US-Google",
+        "female": "US-Google"
+      },
+      "cmn-cn": {
+        "male": "Chinese-Google",
+        "female": "Chinese-Google"
+      },
+      "fr-fr": {
+        "male": "French-Google",
+        "female": "French-Google"
+      }
+    }
+  }
+}

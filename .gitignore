@@ -8,6 +8,9 @@
 /audio/
 /.local-data/
 /data/
+endictation-config.json
+.playwright-cli/
+output/playwright/
 
 # Python 缓存
 __pycache__/

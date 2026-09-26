@@ -6,6 +6,18 @@
     <title>英文听写练习</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
+        #config-dialog { width: min(760px, calc(100% - 24px)); max-height: 90vh; padding: 24px; border: 1px solid #ced4da; border-radius: 8px; }
+        #config-dialog::backdrop { background: rgb(0 0 0 / 35%); }
+        #config-dialog h2 { font-size: 1.4rem; margin: 0; }
+        #config-dialog textarea { font-family: monospace; font-size: 14px; }
+        .config-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+        .config-section { border-top: 1px solid #dee2e6; padding-top: 16px; margin-top: 20px; }
+        #config-dialog h3 { font-size: 1rem; margin-bottom: 12px; }
+        .config-language { border-bottom: 1px solid #dee2e6; padding: 16px 0; }
+        .config-voice-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
+        .config-language label { display: block; font-size: 14px; }
+        .config-actions { background: white; border-top: 1px solid #dee2e6; padding: 16px 0 0; margin-top: 16px; }
+        @media (max-width: 480px) { .config-voice-fields { grid-template-columns: minmax(0, 1fr); } }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f8f9fa;
@@ -177,6 +189,11 @@
 </head>
 <body>
     <div class="container">
+        {% if can_configure %}
+        <div class="d-flex justify-content-end mb-2">
+            <button type="button" class="btn btn-outline-secondary" id="config-btn"><i class="bi bi-gear" aria-hidden="true"></i> 配置</button>
+        </div>
+        {% endif %}
         <h1>中英法文听写练习</h1>
         <div class="upload-area" id="upload-area">
             <p>拖放图片到此处或点击选择文件</p>
@@ -230,7 +247,7 @@
             <div class="row g-3 align-items-end mt-1">
                 <div class="col-md-5">
                     <label for="speed-range" class="form-label">速度：<span id="speed-value">1.00x</span></label>
-                    <input type="range" class="form-range" id="speed-range" min="-50" max="50" step="5" value="-15">
+                    <input type="range" class="form-range" id="speed-range" min="-50" max="50" step="5" value="0">
                     <div class="form-text" id="speed-help"></div>
                 </div>
                 <div class="col-md-3">
@@ -250,6 +267,51 @@
         </div>
     </div>
 
+    {% if can_configure %}
+    <dialog id="config-dialog" aria-labelledby="config-title">
+        <form id="config-form" autocomplete="off">
+            <div class="config-toolbar mb-3">
+                <h2 id="config-title">配置</h2>
+                <button type="button" class="btn-close" id="config-close" aria-label="关闭" title="关闭"></button>
+            </div>
+            <p class="alert alert-warning small">仅限内网直连配置。导出文件包含密钥，请妥善保管。</p>
+            <div id="config-error" class="alert alert-danger" role="alert" hidden></div>
+            <fieldset id="config-fields" disabled>
+                <div class="config-toolbar mb-3">
+                    <button type="button" class="btn btn-outline-secondary" id="config-import"><i class="bi bi-upload" aria-hidden="true"></i> 导入配置</button>
+                    <button type="button" class="btn btn-outline-secondary" id="config-export"><i class="bi bi-download" aria-hidden="true"></i> 导出配置</button>
+                </div>
+                <input type="file" id="config-file" accept=".json,application/json" hidden>
+                <section class="config-section"><h3>图片识别 · Gemini</h3>
+                <div class="mb-3"><label class="form-label" for="config-gemini">API 密钥</label><div class="input-group"><input class="form-control" id="config-gemini" type="password" autocomplete="new-password"><button type="button" class="btn btn-outline-secondary config-reveal" data-target="config-gemini" aria-label="显示 Gemini 密钥" title="显示密钥"><i class="bi bi-eye"></i></button></div></div>
+                <div class="mb-3"><label class="form-label" for="config-ocr">OCR 模型</label><input class="form-control" id="config-ocr" required></div>
+                </section>
+                <section class="config-section"><h3>微软语音 · Azure</h3>
+                <div class="mb-3"><label class="form-label" for="config-azure">API 密钥</label><div class="input-group"><input class="form-control" id="config-azure" type="password" autocomplete="new-password"><button type="button" class="btn btn-outline-secondary config-reveal" data-target="config-azure" aria-label="显示 Azure 密钥" title="显示密钥"><i class="bi bi-eye"></i></button></div></div>
+                </section>
+                <section class="config-section"><h3>Google Cloud 语音</h3>
+                <div class="config-toolbar mb-3">
+                    <span id="config-account" class="small text-break">Google Cloud：未配置</span>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="config-google-import">导入服务账号</button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" id="config-google-clear" title="清除 Google Cloud 凭据" aria-label="清除 Google Cloud 凭据"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                    </div>
+                </div>
+                <input type="file" id="config-google-file" accept=".json,application/json" hidden>
+                </section>
+                <section class="config-section"><h3>语言与音色</h3>
+                    <label class="form-label" for="config-engine">语音引擎</label>
+                    <select class="form-select" id="config-engine"></select>
+                    <p class="small text-secondary mt-2 mb-0" id="config-preferred" role="status"></p>
+                    <div id="config-languages"></div>
+                    <button type="button" class="btn btn-outline-secondary mt-3" id="config-add-language"><i class="bi bi-plus-lg" aria-hidden="true"></i> 添加语言</button>
+                </section>
+                <div class="config-actions d-flex justify-content-end gap-2"><button type="button" class="btn btn-outline-secondary" id="config-cancel">取消</button><button type="submit" class="btn btn-primary" id="config-save"><i class="bi bi-check-lg" aria-hidden="true"></i> 保存并应用</button></div>
+            </fieldset>
+        </form>
+    </dialog>
+    {% endif %}
+    {% if can_configure %}<script src="{{ url_for('static', filename='config-editor.js') }}" defer></script>{% endif %}
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
@@ -280,11 +342,11 @@
             const ttsOptions = {{ tts_options|tojson }};
             const ttsLanguages = {{ tts_languages|tojson }};
             const voiceGenders = {{ voice_genders|tojson }};
-            const ttsVoiceMatrix = {{ tts_voice_matrix|tojson }};
-            const ttsOptionMap = Object.fromEntries(ttsOptions.map(option => [option.id, option]));
-            const ttsLanguageMap = Object.fromEntries(ttsLanguages.map(language => [language.id, language]));
+            let ttsVoiceMatrix = {{ tts_voice_matrix|tojson }};
+            let ttsOptionMap = Object.fromEntries(ttsOptions.map(option => [option.id, option]));
+            let ttsLanguageMap = Object.fromEntries(ttsLanguages.map(language => [language.id, language]));
             const voiceGenderMap = Object.fromEntries(voiceGenders.map(gender => [gender.id, gender]));
-            const defaultTtsSelection = { engine: 'azure', language: 'sg-en', gender: 'female' };
+            const defaultTtsSelection = {{ preferred_tts|tojson }};
 
             // 初始设计值（NAS_MIGRATION §3.6）：轮询 1 秒；网络错误有限重试 1s/2s/4s
             const POLL_INTERVAL_MS = 1000;
@@ -294,10 +356,25 @@
             let currentOcrData = [];
             let uploadingLocked = false;
 
+            // 配置模块独立初始化，不阻断图片上传事件的绑定。
+            {% if can_configure %}
+            document.addEventListener('configuration-saved', event => {
+                const options = event.detail;
+                ttsVoiceMatrix = options.tts_voice_matrix;
+                ttsOptionMap = Object.fromEntries(options.tts_options.map(option => [option.id, option]));
+                ttsLanguageMap = Object.fromEntries(options.tts_languages.map(language => [language.id, language]));
+                replaceSelectOptions(ttsEngineSelect, options.tts_engines, options.preferred_tts.engine);
+                updateLanguageOptions(options.preferred_tts.language);
+                updateGenderOptions();
+                updateSpeedControl();
+            });
+            {% endif %}
             // ---- TTS 选项控件（沿用既有矩阵逻辑） ----
-            ttsEngineSelect.value = defaultTtsSelection.engine;
+            if ([...ttsEngineSelect.options].some(option => option.value === defaultTtsSelection.engine)) {
+                ttsEngineSelect.value = defaultTtsSelection.engine;
+            }
             updateLanguageOptions(defaultTtsSelection.language);
-            updateGenderOptions(defaultTtsSelection.gender);
+            updateGenderOptions('female');
             updateSpeedControl();
             ttsEngineSelect.addEventListener('change', function() {
                 updateLanguageOptions();
@@ -366,10 +443,8 @@
                     || languageOptions.female || Object.values(languageOptions)[0];
                 const option = ttsOptionMap[ttsKey];
                 const supportsSpeed = option && option.supports_speed;
-                const defaultSpeed = option ? option.default_speed : 0;
-                speedRange.value = defaultSpeed;
                 speedRange.disabled = !supportsSpeed;
-                speedValue.textContent = supportsSpeed ? formatSpeedLabel(defaultSpeed) : '不可调';
+                speedValue.textContent = supportsSpeed ? formatSpeedLabel(speedRange.value) : '不可调';
                 speedHelp.textContent = supportsSpeed
                     ? '当前引擎支持按该速度生成。' : '当前引擎不支持速度调整。';
             }
@@ -432,6 +507,8 @@
             }
 
             function uploadFile(file) {
+                stopPolling();
+                const generation = poll.generation;
                 const formData = new FormData();
                 formData.append('file', file);
 
@@ -450,10 +527,12 @@
                 fetch('/upload', { method: 'POST', body: formData })
                     .then(response => readTaskSubmission(response))
                     .then(data => {
+                        if (generation !== poll.generation) return;
                         statusMessage.textContent = 'OCR识别中，请稍候...';
                         startPolling(data.task_id, 'ocr');
                     })
                     .catch(error => {
+                        if (generation !== poll.generation) return;
                         loading.style.display = 'none';
                         uploadingLocked = false;
                         selectFileBtn.disabled = false;
@@ -474,6 +553,8 @@
                     voice_gender: voiceGenderSelect.value,
                     speed: Number(speedRange.value)
                 };
+                stopPolling();
+                const generation = poll.generation;
 
                 hideAlerts();
                 loading.style.display = 'block';
@@ -491,10 +572,12 @@
                 })
                     .then(response => readTaskSubmission(response))
                     .then(data => {
+                        if (generation !== poll.generation) return;
                         statusMessage.textContent = '正在生成TTS音频，请稍候...';
                         startPolling(data.task_id, 'tts');
                     })
                     .catch(error => {
+                        if (generation !== poll.generation) return;
                         loading.style.display = 'none';
                         generateTtsBtn.disabled = false;
                         generateTtsBtn.textContent = '生成TTS';
@@ -521,7 +604,7 @@
             }
 
             // ---- 轮询：单条可停止的定时链，不叠加并发定时器 ----
-            const poll = { active: false, timer: null, taskId: null, stage: null, retryCount: 0 };
+            const poll = { active: false, timer: null, taskId: null, stage: null, retryCount: 0, generation: 0 };
 
             function startPolling(taskId, stage) {
                 stopPolling();
@@ -534,6 +617,7 @@
             }
 
             function stopPolling() {
+                poll.generation += 1;
                 if (poll.timer !== null) {
                     clearTimeout(poll.timer);
                 }
@@ -550,6 +634,7 @@
                     return;
                 }
                 const taskId = poll.taskId;
+                const generation = poll.generation;
                 fetch(`/tasks/${encodeURIComponent(taskId)}`)
                     .then(response => {
                         if (response.status === 404) {
@@ -562,14 +647,14 @@
                         return response.json();
                     })
                     .then(task => {
-                        if (!poll.active || task.task_id !== poll.taskId) {
+                        if (!poll.active || generation !== poll.generation || task.task_id !== poll.taskId) {
                             return; // 切换任务后忽略旧响应
                         }
                         poll.retryCount = 0;
                         handleTaskUpdate(task);
                     })
                     .catch(error => {
-                        if (!poll.active) {
+                        if (!poll.active || generation !== poll.generation) {
                             return;
                         }
                         if (error && error.taskExpired) {
@@ -594,6 +679,7 @@
 
             requeryBtn.addEventListener('click', function() {
                 if (poll.taskId) {
+                    stopPolling();
                     requeryBtn.style.display = 'none';
                     poll.retryCount = 0;
                     poll.active = true;

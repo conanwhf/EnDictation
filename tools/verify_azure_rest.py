@@ -3,7 +3,7 @@
 
 用法：
     .venv/bin/python tools/verify_azure_rest.py           # 受控故障验证（假凭据，只连本地故障服务）
-    .venv/bin/python tools/verify_azure_rest.py --real    # 追加真实 API 合成（需 AZURE_API_KEY，消耗少量额度）
+    .venv/bin/python tools/verify_azure_rest.py --real    # 追加真实 API 合成（读取本地配置，消耗少量额度）
 
 本脚本与生产实现保持同构：相同的 SSML 结构、请求头、超时元组 (connect, read) 与
 「超时后由调用方捕获异常、释放连接、串行执行下一次调用」的执行模型。
@@ -26,6 +26,7 @@ import socket
 import sys
 import threading
 import time
+from pathlib import Path
 
 import requests
 
@@ -37,7 +38,7 @@ READ_TIMEOUT = 30.0     # 秒
 TIMEOUT_TOLERANCE = 5.0  # 秒，容差
 
 OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
-DEFAULT_REGION = os.environ.get("AZURE_SPEECH_REGION", "southeastasia")
+DEFAULT_REGION = "southeastasia"
 
 FAKE_KEY = "fake-key-not-a-real-credential"
 REAL_OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "azure_rest_verify_output")
@@ -362,10 +363,14 @@ def run_fault_tests(tmp_dir):
 
 
 def run_real_test():
-    key = os.environ.get("AZURE_API_KEY") or os.environ.get("AZURE_SPEECH_KEY") or os.environ.get("SPEECH_KEY")
-    if not key:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from config import ConfigStore, DATA_DIR
+    secrets = ConfigStore(DATA_DIR / "config.json").current.secrets
+    key = secrets.get("azure_speech_key")
+    region = secrets.get("azure_speech_region")
+    if not key or not region:
         check("R 真实 API 合成（未验证：缺少凭据）", False,
-              "环境缺少 AZURE_API_KEY/AZURE_SPEECH_KEY/SPEECH_KEY，按计划记为未验证，不当作候选技术失败")
+              "本地配置缺少 Azure 密钥或区域，按计划记为未验证，不当作候选技术失败")
         return
     os.makedirs(REAL_OUTPUT_DIR, exist_ok=True)
     cases = [
@@ -378,7 +383,7 @@ def run_real_test():
         out = os.path.join(REAL_OUTPUT_DIR, f"{name}.mp3")
         try:
             t0 = time.monotonic()
-            synthesize_azure_rest(text, voice_name=voice, speed=speed, key=key, output_path=out)
+            synthesize_azure_rest(text, voice_name=voice, speed=speed, key=key, region=region, output_path=out)
             elapsed = time.monotonic() - t0
             size = os.path.getsize(out)
             ok = size > 0

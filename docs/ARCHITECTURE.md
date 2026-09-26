@@ -40,7 +40,8 @@ EnDictation/
 ├── templates/
 │   └── index.html       # 前端单页面（轮询 + DOM 渲染）
 ├── tests/               # 任务模型与接口测试（外部 API 为假实现）
-├── conftest.py          # 测试环境（固定假 SECRET_KEY、临时 DATA_DIR）
+├── config.py            # 服务配置、校验、原子保存、签名密钥生成
+├── conftest.py          # 测试环境（临时运行目录，不加载真实配置）
 ├── tools/
 │   └── verify_azure_rest.py   # Azure REST 受控故障验证脚本（步骤 1）
 ├── requirements.txt / requirements-dev.txt
@@ -63,7 +64,7 @@ EnDictation/
 ### 目录与文件布局
 
 ```
-<DATA_DIR>/tasks/<task_id>/     # DATA_DIR 由环境变量指定（容器内 /data）
+.local-data/tasks/<task_id>/   # 项目根目录下；容器内 /app/.local-data
   input.<按MIME的扩展名>         # OCR 临时输入（服务端命名，结束后删除）
   sentence_<index>.mp3          # TTS 整句音频
   word_<index>_<index>.mp3       # TTS 重点词音频
@@ -75,14 +76,14 @@ EnDictation/
 
 ## 会话与隔离
 
-- Flask 签名 session cookie（`SECRET_KEY` 必需，无回退默认值；启动检查在 `app.bootstrap_runtime()`，Gunicorn worker 导入与 `python app.py` 共用）。cookie `HttpOnly`、`SameSite=Lax`、生存期 7 天，未启用 `Secure`（本阶段为本机/受信 LAN HTTP 验证）。
+- Flask 签名 session cookie（签名密钥自动生成到 `.local-data/.session-key`，不读取环境变量或随服务配置导出）。cookie `HttpOnly`、`SameSite=Lax`、生存期 7 天，未启用 `Secure`（本阶段为本机/受信 LAN HTTP 验证）。
 - 首次访问首页生成随机会话 ID（`sid`），任务登记 owner；状态与音频读取都校验 owner，不匹配时与「任务不存在」统一返回 `404`，不泄露任务是否曾经存在。
-- 写接口（`/upload`、`/generate-tts`）要求同源：拒绝不匹配的 `Origin`；无 `Origin` 时按 `Referer` 校验；都没有则拒绝（`403`）。
+- 写接口（`/upload`、`/generate-tts`、`/config`）要求同源：拒绝不匹配的 `Origin`；无 `Origin` 时按 `Referer` 校验；都没有则拒绝（`403`）。配置 GET/POST 另要求本机、家庭 LAN 或 Tailscale 直连，并拒绝 Cloudflare 和转发头；外部页面不渲染配置入口。不鉴别受信内网用户身份，详见 [配置安全边界](CONFIGURATION.md#安全边界)。
 - 同一浏览器的多个标签页共享会话；独立浏览器/无痕窗口相互隔离。
 
 ### 重启行为
 
-内存任务状态随进程重启丢失；磁盘文件是否保留取决于容器重建与卷挂载，两者不能混为一谈。进程重启后：旧任务（含排队项）一律失效，状态与音频接口返回 `404`；worker 启动时删除 `<DATA_DIR>/tasks` 下遗留的任务目录（只清理应用专属目录）。
+内存任务状态随进程重启丢失；磁盘文件是否保留取决于容器重建与卷挂载，两者不能混为一谈。进程重启后：旧任务（含排队项）一律失效，状态与音频接口返回 `404`；worker 启动时删除 `.local-data/tasks` 下遗留的任务目录（只清理应用专属目录，不删除服务配置和签名密钥）。
 
 ---
 
@@ -164,29 +165,30 @@ Azure REST 路径的受控故障验证结论（连接拒绝、连接建立超时
 - 渲染全部使用 DOM API：标题/正文以 `textContent` 设置，正文按普通文本节点与 `<strong>` 节点拼装，`**加粗**` 前端格式化保留；播放按钮按固定模板构建，仅含有效 `audio_path` 的句子/重点词创建，其余保留加粗文字；无服务端 HTML 注入。
 - 失败与部分失败：任务失败显示稳定错误说明；`warnings` 逐条可见；容量 `429` 明确提示未受理并保留 OCR 内容与选择。
 - `currentOcrData` 保留原始 OCR 数据，重复 TTS 不触发新 OCR。
+- 新提交开始时使旧轮询失效；提交响应与轮询的成功、404、网络错误均校验本次操作序号。旧响应不能停止新任务轮询或解锁新任务控件。
+- 「配置」按钮以独立的 `static/config-editor.js` 初始化表单，支持按引擎编辑语言/音色及导入、导出 JSON；微软区域仅保留底层参数，不在页面展示。保存后更新下拉选项，不刷新页面；速度与性别选择不写入配置文件。配置模块与上传事件分开绑定。
 
 ---
 
 ## 部署
 
-### 环境变量
+### 配置文件
 
-见 [README](../README.md) 的环境变量表。`SECRET_KEY` 缺失时启动直接失败；凭据只通过进程环境或只读文件挂载传入，日志不打印密钥与凭据 JSON。
+服务配置优先从 `.local-data/config.json` 加载，不存在时读取可提交 Git 的无密钥 `config.default.json`。经内网页面「配置」保存到运行目录；不兼容环境变量和 Google ADC。具体结构见 [配置说明](CONFIGURATION.md)。已受理任务使用提交时的配置，新任务使用保存后的配置。日志不打印密钥与凭据 JSON。
 
 ### 容器（compose.nas.yml）
 
 ```bash
-SECRET_KEY=... docker compose -f compose.nas.yml up -d
+docker compose -f compose.nas.yml up -d
 ```
 
-- 镜像 `linux/amd64`、Debian `python:3.11-slim`、非 root 运行；空 named volume 首挂载继承 `/data/tasks` 属主。
+- 镜像 `linux/amd64`、Debian `python:3.11-slim`、非 root 运行；空 named volume 首挂载继承 `/app/.local-data/tasks` 属主。
 - 端口仅绑定 `127.0.0.1:15901:5001`；`restart: unless-stopped`（重启意味着未完成任务丢失，不表示续跑）。
 - 本阶段不设 CPU/内存硬限制（本机空转实测约 99MiB / 0.12% CPU，供 NAS 部署值参考）。
 
 ### 本地运行
 
 ```bash
-export SECRET_KEY="..." GOOGLE_API_KEY="..."
 python app.py          # 开发入口
 ./startup.sh           # 带检查的 Gunicorn 启动
 ```

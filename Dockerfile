@@ -3,24 +3,23 @@
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PORT=5001 \
-    DATA_DIR=/data
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py tasks.py ./
+COPY app.py tasks.py config.py config.default.json ./
 COPY templates ./templates
+COPY static ./static
 
-# 非 root 运行；预创建 /data/tasks 并归属应用用户。
+# 非 root 运行；预创建运行目录并归属应用用户。
 # 空 named volume 首次挂载时会继承该目录的属主与权限；已有卷若不可写，
 # 应用启动探测会直接失败并输出路径与所需权限（app.bootstrap_runtime）。
 RUN useradd --create-home --uid 1000 endictation \
-    && mkdir -p /data/tasks \
-    && chown -R endictation:endictation /data /app
+    && mkdir -p /app/.local-data/tasks \
+    && chown -R endictation:endictation /app
 
 USER endictation
 

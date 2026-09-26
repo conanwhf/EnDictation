@@ -13,21 +13,21 @@
 
 import argparse
 import html
-import json
 import logging
 import math
-import os
 import re
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from ipaddress import IPv6Address, ip_address, ip_network
 
 import requests
-from flask import (Flask, abort, jsonify, render_template, request,
+from flask import (Flask, abort, current_app, jsonify, render_template, request,
                    send_from_directory, session)
 from google import genai
 from google.genai import types as genai_types
 
+import config as config_module
 from tasks import CapacityError, TaskFailure, TaskManager
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,7 +52,7 @@ except ImportError:
 
 # ---- 初始设计值常量（NAS_MIGRATION §3.5/§3.6；不提供环境变量配置） ----
 
-DEFAULT_DATA_DIR = ".local-data"
+DEFAULT_DATA_DIR = config_module.DATA_DIR
 # 2026-09-25 用户决策：移除上传内容的本地校验（格式白名单、像素上限、请求体上限），
 # 恢复旧版「直接上传」语义：字节原样转发提供方，内容有效性由提供方判定，
 # 失败以 ocr_failed 明确报错。create_app 的 max_content_length 参数保留供部署方自行设置。
@@ -77,7 +77,6 @@ TASK_BUDGET_SECONDS = 600                     # 单任务执行预算（从实�
 SPEED_MIN, SPEED_MAX = -50, 50                # 语速百分比范围
 SESSION_LIFETIME_DAYS = 7                     # 会话 cookie 生存期
 
-OCR_MODEL = "gemini-3-flash-preview"
 # genai HttpOptions.timeout 的单位是毫秒（SDK 内部会除以 1000 换算成秒传给 httpx），
 # 实测误传秒值 120 会在 ~1 秒内触发 read timeout；这里表示 120 秒。
 OCR_TIMEOUT_MS = 120_000
@@ -95,244 +94,18 @@ GOOGLE_CLOUD_TTS_TIMEOUT_SECONDS = 30.0
 AUDIO_FILENAME_RE = re.compile(r"^(sentence|word)_[0-9]+(_[0-9]+)?\.mp3$")
 
 
-def get_env_first(*names, default=None):
-    """按顺序读取第一个非空环境变量"""
-    for name in names:
-        value = os.environ.get(name)
-        if value:
-            return value
-    return default
+# ---- 运行时配置（config.py）：配置文件为唯一凭据/引擎来源 ----
+# 密钥、OCR 模型、引擎/语言/音色与组合矩阵可经页面「配置」导入导出；
+# 速度与男女声是终端用户选择，不进入配置文件。
+
+def get_config():
+    return current_app.extensions["config_store"].current
 
 
-GEMINI_API_KEY = get_env_first("GOOGLE_API_KEY", "GEMINI_API_KEY")
-AZURE_SPEECH_KEY = get_env_first("AZURE_API_KEY", "AZURE_SPEECH_KEY", "SPEECH_KEY")
-AZURE_SPEECH_REGION = get_env_first("AZURE_SPEECH_REGION", "AZURE_SERVICE_REGION", default="southeastasia")
-
-# TTS服务配置字典
-tts_models = {
-    "SG-man": {
-        "label": "新加坡英语-男声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "en-SG-WayneNeural",
-        "speed": "-10%",
-    },
-    "SG-woman": {
-        "label": "新加坡英语-女声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "en-SG-LunaNeural",
-        "speed": "-15%",
-    },
-    "UK-man": {
-        "label": "英式英语/中文-男声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "en-GB-OllieMultilingualNeural",
-        "speed": "-10%",
-    },
-    "UK-woman": {
-        "label": "英式英语/中文-女声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "en-GB-LibbyNeural",
-        "speed": "-10%",
-    },
-    "US-Azure-man": {
-        "label": "美式英语-男声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "en-US-GuyNeural",
-        "speed": "-10%",
-    },
-    "US-Azure-woman": {
-        "label": "美式英语-女声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "en-US-JennyNeural",
-        "speed": "-10%",
-    },
-    "CH-man": {
-        "label": "中文-男声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "zh-CN-YunyangNeural",
-        "speed": "-20%",
-    },
-    "CH-woman": {
-        "label": "中文-女声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "zh-CN-XiaoxiaoNeural",
-        "speed": "-20%",
-    },
-    "French-Azure-man": {
-        "label": "法语-男声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "fr-FR-HenriNeural",
-        "speed": "-10%",
-    },
-    "French-Azure-woman": {
-        "label": "法语-女声 (Microsoft)",
-        "type": "ms-tts",
-        "speech_key": AZURE_SPEECH_KEY,
-        "service_region": AZURE_SPEECH_REGION,
-        "voice_name": "fr-FR-DeniseNeural",
-        "speed": "-10%",
-    },
-    "UK-Google": {
-        "label": "英式英语 (Google)",
-        "type": "gtts",
-        "lang": "en",
-        "tld": "co.uk",
-    },
-    "US-Google": {
-        "label": "美式英语 (Google)",
-        "type": "gtts",
-        "lang": "en",
-        "tld": "com",
-    },
-    "French-Google": {
-        "label": "法语 (Google)",
-        "type": "gtts",
-        "lang": "fr",
-        "tld": "fr",
-    },
-    "Chinese-Google": {
-        "label": "中文 (Google)",
-        "type": "gtts",
-        "lang": "zh",
-        "tld": "com",
-    },
-    "English-Chirp": {
-        "label": "英语 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "en-GB",
-        "voice_name": "en-GB-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-    "UK-Chirp-man": {
-        "label": "英式英语-男声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "en-GB",
-        "voice_name": "en-GB-Chirp3-HD-Charon",
-        "speed": "-10%",
-    },
-    "UK-Chirp-woman": {
-        "label": "英式英语-女声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "en-GB",
-        "voice_name": "en-GB-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-    "US-Chirp-man": {
-        "label": "美式英语-男声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "en-US",
-        "voice_name": "en-US-Chirp3-HD-Charon",
-        "speed": "-10%",
-    },
-    "US-Chirp-woman": {
-        "label": "美式英语-女声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "en-US",
-        "voice_name": "en-US-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-    "Chinese-Chirp": {
-        "label": "中文 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "cmn-CN",
-        "voice_name": "cmn-CN-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-    "Chinese-Chirp-man": {
-        "label": "中文普通话-男声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "cmn-CN",
-        "voice_name": "cmn-CN-Chirp3-HD-Charon",
-        "speed": "-10%",
-    },
-    "Chinese-Chirp-woman": {
-        "label": "中文普通话-女声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "cmn-CN",
-        "voice_name": "cmn-CN-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-    "French-Chirp": {
-        "label": "法语 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "fr-FR",
-        "voice_name": "fr-FR-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-    "French-Chirp-man": {
-        "label": "法语-男声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "fr-FR",
-        "voice_name": "fr-FR-Chirp3-HD-Charon",
-        "speed": "-10%",
-    },
-    "French-Chirp-woman": {
-        "label": "法语-女声 (Google Cloud Chirp 3 HD)",
-        "type": "google-cloud-tts",
-        "language_code": "fr-FR",
-        "voice_name": "fr-FR-Chirp3-HD-Leda",
-        "speed": "-10%",
-    },
-}
-
-tts_engines = [
-    {"id": "azure", "label": "Azure"},
-    {"id": "google", "label": "Google"},
-    {"id": "gtts", "label": "gTTS"},
-]
-
-tts_languages = [
-    {"id": "uk-en", "label": "英式英语"},
-    {"id": "us-en", "label": "美式英语"},
-    {"id": "sg-en", "label": "新加坡英语"},
-    {"id": "cmn-cn", "label": "中文"},
-    {"id": "fr-fr", "label": "法语"},
-]
-
-voice_genders = [
+VOICE_GENDERS = [
     {"id": "male", "label": "男声"},
     {"id": "female", "label": "女声"},
 ]
-
-tts_voice_matrix = {
-    "azure": {
-        "uk-en": {"male": "UK-man", "female": "UK-woman"},
-        "us-en": {"male": "US-Azure-man", "female": "US-Azure-woman"},
-        "sg-en": {"male": "SG-man", "female": "SG-woman"},
-        "cmn-cn": {"male": "CH-man", "female": "CH-woman"},
-        "fr-fr": {"male": "French-Azure-man", "female": "French-Azure-woman"},
-    },
-    "google": {
-        "uk-en": {"male": "UK-Chirp-man", "female": "UK-Chirp-woman"},
-        "us-en": {"male": "US-Chirp-man", "female": "US-Chirp-woman"},
-        "cmn-cn": {"male": "Chinese-Chirp-man", "female": "Chinese-Chirp-woman"},
-        "fr-fr": {"male": "French-Chirp-man", "female": "French-Chirp-woman"},
-    },
-    "gtts": {
-        "uk-en": {"male": "UK-Google", "female": "UK-Google"},
-        "us-en": {"male": "US-Google", "female": "US-Google"},
-        "cmn-cn": {"male": "Chinese-Google", "female": "Chinese-Google"},
-        "fr-fr": {"male": "French-Google", "female": "French-Google"},
-    },
-}
 
 
 def tts_supports_speed(tts_model):
@@ -369,16 +142,35 @@ def format_google_cloud_speaking_rate(speed_percent):
 
 
 def get_tts_options():
-    """返回前端需要的TTS选项元数据"""
+    """返回前端需要的TTS选项元数据（速度为终端用户选择，默认 0）"""
     return [
         {
             "id": key,
             "label": value.get("label", key),
             "supports_speed": tts_supports_speed(value),
-            "default_speed": parse_speed_percent(value.get("speed")),
         }
-        for key, value in tts_models.items()
+        for key, value in get_config().tts_models.items()
     ]
+
+
+def get_tts_engines():
+    """返回前端可选TTS引擎"""
+    return get_config().tts_engines
+
+
+def get_tts_languages():
+    """返回前端可选语言/口音"""
+    return get_config().tts_languages
+
+
+def get_voice_genders():
+    """返回前端可选声音性别（终端用户选择，不进入配置文件）"""
+    return list(VOICE_GENDERS)
+
+
+def get_tts_voice_matrix():
+    """返回前端的引擎、语言和声音组合配置"""
+    return get_config().tts_voice_matrix
 
 
 # ---- 请求校验 ----
@@ -394,11 +186,10 @@ class RequestValidationError(Exception):
 
 
 def validate_speed_value(value, tts_model):
-    """校验 speed：缺省取模型默认；非有限数值或越界返回 400；不支持速度的引擎忽略该值。"""
+    """校验 speed：缺省为 0；非有限数值或越界返回 400；不支持速度的引擎忽略该值。"""
     if value is None:
-        if tts_supports_speed(tts_model):
-            return parse_speed_percent(tts_model.get("speed"))
-        return None
+        # 速度为终端用户选择：缺省即为 0（不支持速度的引擎忽略）
+        return 0 if tts_supports_speed(tts_model) else None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RequestValidationError(400, "invalid_input", "speed 必须是数字")
     if not math.isfinite(value):
@@ -490,13 +281,15 @@ def validate_tts_request(data):
     gender = data.get("voice_gender")
     if not all(isinstance(field, str) and field for field in (engine, language, gender)):
         raise RequestValidationError(400, "invalid_input", "必须提供 tts_engine、tts_language 与 voice_gender")
-    engine_options = tts_voice_matrix.get(engine)
+    runtime_config = get_config()
+    engine_options = runtime_config.tts_voice_matrix.get(engine)
     language_options = (engine_options or {}).get(language)
     tts_key = (language_options or {}).get(gender)
     if tts_key is None:
         raise RequestValidationError(400, "invalid_tts_combo",
                                      "所选引擎、语言与音色组合不受支持，不回退到默认音色")
-    tts_model = tts_models[tts_key]
+    tts_model = runtime_config.tts_models[tts_key]
+    tts_model["_secrets"] = runtime_config.secrets
 
     speed_percent = validate_speed_value(data.get("speed"), tts_model)
     return clean_rows, tts_model, speed_percent
@@ -520,24 +313,13 @@ def save_upload_file(file_storage, task_dir):
 
 # ---- OCR ----
 
-_gemini_client = None
-
-
-def get_gemini_client():
-    """惰性创建 genai 客户端：显式 HTTP 超时、单次尝试不自动重试。"""
-    global _gemini_client
-    if _gemini_client is None:
-        client_options = {"timeout": OCR_TIMEOUT_MS, "retry_options": {"attempts": 1}}
-        if GEMINI_API_KEY:
-            _gemini_client = genai.Client(
-                api_key=GEMINI_API_KEY,
-                http_options=genai_types.HttpOptions(**client_options),
-            )
-        else:
-            _gemini_client = genai.Client(
-                http_options=genai_types.HttpOptions(**client_options),
-            )
-    return _gemini_client
+def get_gemini_client(runtime_config):
+    api_key = runtime_config.secrets.get("google_api_key")
+    if not api_key:
+        raise ValueError("Gemini 密钥未配置，请打开「配置」")
+    return genai.Client(api_key=api_key, vertexai=False,
+                        http_options=genai_types.HttpOptions(
+                            timeout=OCR_TIMEOUT_MS, retry_options={"attempts": 1}))
 
 
 def merge_standalone_number_labels(lines):
@@ -603,31 +385,30 @@ def parse_ocr_response(text):
     return sentences
 
 
-def extract_text_cloud(image_path, mime_type):
+def extract_text_cloud(image_path, mime_type, runtime_config):
     """使用 Gemini API 进行 OCR 识别"""
     logger.info("使用Gemini OCR服务处理图片")
-    client = get_gemini_client()
-
     with open(image_path, 'rb') as f:
         image_bytes = f.read()
 
-    response = client.models.generate_content(
-        model=OCR_MODEL,
-        contents=[
-            {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
-            OCR_PROMPT,
-        ],
-    )
+    with get_gemini_client(runtime_config) as client:
+        response = client.models.generate_content(
+            model=runtime_config.ocr_model,
+            contents=[
+                {"inline_data": {"mime_type": mime_type, "data": image_bytes}},
+                OCR_PROMPT,
+            ],
+        )
 
     text = response.text
     return parse_ocr_response(text)
 
 
-def run_ocr_task(context, mime_type):
+def run_ocr_task(context, mime_type, runtime_config):
     """OCR 任务执行函数：一次外部调用，成功或失败都在任务状态中明确表达。"""
     context.set_progress(0, 0, "正在识别图片文本")
     try:
-        sentences = extract_text_cloud(context.input_path, mime_type)
+        sentences = extract_text_cloud(context.input_path, mime_type, runtime_config)
     except Exception as exc:
         raise TaskFailure("ocr_failed", f"OCR 识别失败：{exc}") from exc
     if not sentences:
@@ -641,6 +422,7 @@ def run_ocr_task(context, mime_type):
 def build_ssml(text, voice_name, speed):
     """与既有 SSML 结构保持一致：文本转义，prosody 控制语速。"""
     ssml_body = html.escape(text, quote=False)
+    voice_name = html.escape(voice_name, quote=True)
     return f"""
 <speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
     <voice name='{voice_name}'>
@@ -658,12 +440,17 @@ def synthesize_azure_rest(text, tts_model, speed_percent, output_path):
     超时 (connect, read) = (5, 30) 秒，requests 默认不自动重试；
     失败直接抛出异常，不写空文件。
     """
-    speech_key = tts_model.get("speech_key")
+    secrets = tts_model["_secrets"]
+    speech_key = secrets.get("azure_speech_key")
     if not speech_key:
-        raise ValueError("Azure Speech 密钥未配置（AZURE_API_KEY）")
-    speed = format_speed_percent(speed_percent) if speed_percent is not None else tts_model["speed"]
+        raise ValueError("Azure Speech 密钥未配置（请经页面「配置」导入）")
+    region = tts_model.get("service_region") \
+        or secrets.get("azure_speech_region")
+    if not region:
+        raise ValueError("Azure Speech 区域未配置")
+    speed = format_speed_percent(speed_percent)
     ssml = build_ssml(text, tts_model["voice_name"], speed)
-    url = f"https://{tts_model['service_region']}.tts.speech.microsoft.com/cognitiveservices/v1"
+    url = f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1"
     headers = {
         "Ocp-Apim-Subscription-Key": speech_key,
         "Content-Type": "application/ssml+xml",
@@ -697,52 +484,37 @@ def synthesize_gtts(text, tts_model, output_path):
         raise ValueError("gTTS 未产生有效音频")
 
 
-_google_cloud_tts_client = None
-
-
-def get_google_cloud_tts_client():
-    """惰性创建 Google Cloud TTS 客户端（进程内复用）。"""
-    global _google_cloud_tts_client
-    if _google_cloud_tts_client is None:
-        credentials_json = get_env_first(
-            "GOOGLE_CLOUD_TTS_CREDENTIALS_JSON",
-            "GOOGLE_CREDENTIALS_JSON",
-            "GOOGLE_SERVICE_ACCOUNT_JSON",
-            "GCP_SERVICE_ACCOUNT_JSON",
-        )
-        if credentials_json:
-            credentials = service_account.Credentials.from_service_account_info(json.loads(credentials_json))
-            _google_cloud_tts_client = texttospeech.TextToSpeechClient(credentials=credentials)
-        else:
-            _google_cloud_tts_client = texttospeech.TextToSpeechClient()
-    return _google_cloud_tts_client
+def get_google_cloud_tts_client(secrets):
+    info = secrets.get("google_cloud_tts_credentials_json")
+    if not info:
+        raise ValueError("Google Cloud 服务账号未配置，请打开「配置」")
+    credentials = service_account.Credentials.from_service_account_info(info)
+    return texttospeech.TextToSpeechClient(credentials=credentials)
 
 
 def synthesize_google_cloud(text, tts_model, speed_percent, output_path):
     """Google Cloud TTS：按调用传入超时，并显式关闭默认重试。"""
     if not TTS_GOOGLE_CLOUD_AVAILABLE:
         raise ValueError("google-cloud-texttospeech 库未安装，Google Cloud TTS 引擎不可用")
-    client = get_google_cloud_tts_client()
     input_text = texttospeech.SynthesisInput(text=text)
     voice = texttospeech.VoiceSelectionParams(
         language_code=tts_model["language_code"],
         name=tts_model["voice_name"],
     )
-    if speed_percent is not None:
-        speaking_rate = format_google_cloud_speaking_rate(speed_percent)
-    else:
-        speaking_rate = format_google_cloud_speaking_rate(tts_model.get("speed"))
+    # 速度为终端用户选择：缺省即 0（1.00x）
+    speaking_rate = format_google_cloud_speaking_rate(speed_percent)
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
         speaking_rate=speaking_rate,
     )
-    response = client.synthesize_speech(
-        input=input_text,
-        voice=voice,
-        audio_config=audio_config,
-        retry=None,
-        timeout=GOOGLE_CLOUD_TTS_TIMEOUT_SECONDS,
-    )
+    with get_google_cloud_tts_client(tts_model["_secrets"]) as client:
+        response = client.synthesize_speech(
+            input=input_text,
+            voice=voice,
+            audio_config=audio_config,
+            retry=None,
+            timeout=GOOGLE_CLOUD_TTS_TIMEOUT_SECONDS,
+        )
     if not response.audio_content:
         raise ValueError("Google Cloud TTS 返回空音频")
     output_path.write_bytes(response.audio_content)
@@ -842,6 +614,27 @@ def run_tts_task(context, sentences, tts_model, speed_percent):
 
 # ---- 应用与路由 ----
 
+CONFIG_NETWORKS = tuple(map(ip_network, (
+    "127.0.0.1/32", "::1/128", "192.168.0.0/24", "100.64.0.0/10",
+)))
+CONFIG_PROXY_HEADERS = (
+    "CF-Connecting-IP", "Cf-Access-Jwt-Assertion", "Forwarded",
+    "X-Forwarded-For", "X-Real-IP", "X-Forwarded-Host", "X-Forwarded-Proto",
+)
+
+
+def config_access_allowed():
+    # 只认连接对端；Tunnel 即使连接来自本机也不能读写密钥。
+    if any(name in request.headers for name in CONFIG_PROXY_HEADERS):
+        return False
+    try:
+        peer = ip_address(request.remote_addr or "")
+    except ValueError:
+        return False
+    if isinstance(peer, IPv6Address) and peer.ipv4_mapped:
+        peer = peer.ipv4_mapped
+    return any(peer in network for network in CONFIG_NETWORKS)
+
 def _error_response(status, code, message):
     return jsonify({"error": {"code": code, "message": message}}), status
 
@@ -864,11 +657,20 @@ def _require_same_origin():
         abort(403)
 
 
-def create_app(task_manager, *, max_content_length=None):
-    """构建 Flask 应用；测试可注入独立 TaskManager 与自定义请求体上限（None 为不限制）。"""
+def default_config_path(data_dir):
+    """配置文件路径：<DATA_DIR>/config.json（容器内随数据卷持久化）。"""
+    return Path(data_dir) / "config.json"
+
+
+def create_app(task_manager, *, max_content_length=None,
+               config_path=None):
+    """构建 Flask 应用；测试可注入独立 TaskManager、自定义请求体上限与配置文件路径。"""
     flask_app = Flask(__name__)
+    config_path = Path(config_path or default_config_path(task_manager.tasks_root.parent))
+    store = config_module.ConfigStore(config_path)
+    flask_app.extensions["config_store"] = store
     flask_app.config.update(
-        SECRET_KEY=os.environ["SECRET_KEY"],
+        SECRET_KEY=config_module.session_key(config_path.parent),
         MAX_CONTENT_LENGTH=max_content_length,
         SESSION_COOKIE_NAME="endictation_session",
         SESSION_COOKIE_HTTPONLY=True,
@@ -877,6 +679,17 @@ def create_app(task_manager, *, max_content_length=None):
         SESSION_COOKIE_SECURE=False,
         PERMANENT_SESSION_LIFETIME=timedelta(days=SESSION_LIFETIME_DAYS),
     )
+
+    @flask_app.before_request
+    def protect_configuration():
+        if request.path == "/config" and not config_access_allowed():
+            return _error_response(403, "config_forbidden", "配置仅允许从本机、家庭 LAN 或 Tailscale 直连访问")
+
+    @flask_app.after_request
+    def private_config_response(response):
+        if request.path in ("/", "/config"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
     @flask_app.errorhandler(413)
     def request_too_large(_error):
@@ -894,11 +707,42 @@ def create_app(task_manager, *, max_content_length=None):
         return render_template(
             "index.html",
             tts_options=get_tts_options(),
-            tts_engines=tts_engines,
-            tts_languages=tts_languages,
-            voice_genders=voice_genders,
-            tts_voice_matrix=tts_voice_matrix,
+            tts_engines=get_tts_engines(),
+            tts_languages=get_tts_languages(),
+            voice_genders=get_voice_genders(),
+            tts_voice_matrix=get_tts_voice_matrix(),
+            preferred_tts=get_config().preferred_tts,
+            can_configure=config_access_allowed(),
         )
+
+    @flask_app.get("/config")
+    def export_config():
+        """仅向受信直连来源导出完整配置（含密钥）。"""
+        _require_session_id()
+        return jsonify(get_config().raw)
+
+    @flask_app.post("/config")
+    def import_config():
+        """内网导入配置：校验、落盘、热生效。"""
+        _require_same_origin()
+        _require_session_id()
+        data = request.get_json(silent=True)
+        if data is None:
+            return _error_response(400, "invalid_config", "请求体不是有效 JSON")
+        try:
+            store.save(data)
+        except config_module.ConfigError as exc:
+            return _error_response(400, "invalid_config", str(exc))
+        except OSError:
+            return _error_response(500, "config_persist_failed", "配置文件写入失败，请检查数据目录权限")
+        return jsonify({
+            "applied": True,
+            "tts_options": get_tts_options(),
+            "tts_engines": get_tts_engines(),
+            "tts_languages": get_tts_languages(),
+            "tts_voice_matrix": get_tts_voice_matrix(),
+            "preferred_tts": get_config().preferred_tts,
+        })
 
     @flask_app.get("/health")
     def health():
@@ -918,6 +762,7 @@ def create_app(task_manager, *, max_content_length=None):
             return _error_response(400, "invalid_input", "未选择文件")
 
         holder = {}
+        runtime_config = get_config()
 
         def input_saver(task_dir):
             input_name, mime_type = save_upload_file(file, task_dir)
@@ -925,7 +770,7 @@ def create_app(task_manager, *, max_content_length=None):
             return str(task_dir / input_name)
 
         def execute(context):
-            return run_ocr_task(context, holder["mime_type"])
+            return run_ocr_task(context, holder["mime_type"], runtime_config)
 
         try:
             snapshot = task_manager.submit(
@@ -989,16 +834,14 @@ def create_app(task_manager, *, max_content_length=None):
 
 # ---- 启动引导 ----
 
-def bootstrap_runtime(data_dir_env=None):
+def bootstrap_runtime(data_dir=None):
     """进程启动入口检查与初始化；Gunicorn worker 导入与 python app.py 共用。
 
-    - 必须设置 SECRET_KEY，无任何回退默认值；
-    - 任务目录必须可写，权限错误直接启动失败并给出路径与所需权限。
+    - 会话签名密钥由 create_app 在数据目录生成并持久化；
+    - 任务目录必须可写，权限错误直接启动失败并给出路径与所需权限；
+    - create_app 加载配置文件（凭据唯一来源，不读环境变量）；文件不合法直接启动失败。
     """
-    if not os.environ.get("SECRET_KEY"):
-        raise RuntimeError(
-            "启动失败：必须设置环境变量 SECRET_KEY（用于会话签名），不得使用回退默认值。")
-    data_dir = Path(data_dir_env or os.environ.get("DATA_DIR") or DEFAULT_DATA_DIR)
+    data_dir = Path(data_dir or DEFAULT_DATA_DIR)
     tasks_root = data_dir / "tasks"
     try:
         tasks_root.mkdir(parents=True, exist_ok=True)
@@ -1008,6 +851,7 @@ def bootstrap_runtime(data_dir_env=None):
     except OSError as exc:
         raise RuntimeError(
             f"启动失败：任务目录 {tasks_root} 不可写（需要写入权限）：{exc}") from exc
+
     task_manager = TaskManager(tasks_root)
     # 进程重启后旧任务一律失效：只清理本应用专属任务目录
     task_manager.purge_all_task_dirs()
@@ -1022,7 +866,7 @@ app = create_app(manager)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5001)),
+    parser.add_argument('--port', type=int, default=5001,
                         help='Port to run the server on')
     args = parser.parse_args()
-    app.run(host='0.0.0.0', debug=False, port=args.port)
+    app.run(host='127.0.0.1', debug=False, port=args.port)
